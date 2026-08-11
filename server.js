@@ -2,7 +2,24 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 
-const port = Number(process.env.PORT) || 5173;
+function getPort(args = process.argv.slice(2), environment = process.env) {
+  const portFlagIndex = args.findIndex(argument =>
+    argument === '-p' || argument === '--port' || argument.startsWith('--port='),
+  );
+  const portArgument = portFlagIndex >= 0 ? args[portFlagIndex] : '';
+  const flagPort = Number(
+    portArgument.startsWith('--port=')
+      ? portArgument.slice('--port='.length)
+      : args[portFlagIndex + 1],
+  );
+  const environmentPort = Number(environment.PORT);
+
+  if (Number.isInteger(flagPort) && flagPort > 0 && flagPort <= 65535) return flagPort;
+  if (Number.isInteger(environmentPort) && environmentPort > 0 && environmentPort <= 65535) return environmentPort;
+  return 5173;
+}
+
+const port = getPort();
 const root = process.cwd();
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
