@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Marketing Pulse</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand"><span>M</span> Marketing Pulse</div>
+        <nav aria-label="주요 메뉴">
+          <a class="active" href="#overview">성과 요약</a>
+          <a href="#channels">매체별 성과</a>
+        </nav>
+        <p class="sidebar-note">TEST DASHBOARD</p>
+      </aside>
+
+      <main>
+        <header>
+          <div>
+            <p class="eyebrow">PERFORMANCE OVERVIEW</p>
+            <h1>마케팅 성과 대시보드</h1>
+            <p class="subtitle">핵심 광고 지표를 한눈에 확인하세요.</p>
+          </div>
+          <label class="period-control">
+            조회 기간
+            <select id="period" aria-label="조회 기간">
+              <option value="7">최근 7일</option>
+              <option value="30" selected>최근 30일</option>
+            </select>
+          </label>
+        </header>
+
+        <section id="overview" class="metric-grid" aria-label="핵심 지표"></section>
+
+        <section id="channels" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">CHANNEL BREAKDOWN</p>
+              <h2>매체별 성과</h2>
+            </div>
+            <span id="updated-at" class="updated-at"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>매체</th><th>노출</th><th>클릭</th><th>광고비</th><th>전환</th><th>매출</th><th>CTR</th><th>ROAS</th>
+                </tr>
+              </thead>
+              <tbody id="channel-rows"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
