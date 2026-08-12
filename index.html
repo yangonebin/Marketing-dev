@@ -3,26 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Marketing Pulse</title>
+    <title>BLACKYAK Performance Basecamp</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand"><span>M</span> Marketing Pulse</div>
+        <a class="brand" href="#overview" aria-label="블랙야크 퍼포먼스 홈">
+          <img src="assets/blackyak-modern-logo.png" alt="BLACKYAK" />
+        </a>
+
         <nav aria-label="주요 메뉴">
-          <a class="active" href="#overview">성과 요약</a>
-          <a href="#channels">매체별 성과</a>
+          <p class="nav-label">REPORT</p>
+          <a class="active" href="#overview"><span>01</span>성과 개요</a>
+          <a href="#trend"><span>02</span>성과 추이</a>
+          <a href="#channels"><span>03</span>매체 분석</a>
         </nav>
-        <p class="sidebar-note">TEST DASHBOARD</p>
+
+        <div class="sidebar-status">
+          <span class="status-dot"></span>
+          <div><strong>데이터 연결 정상</strong><small>마지막 동기화 · 방금 전</small></div>
+        </div>
+        <p class="sidebar-note">BLACKYAK © 2026</p>
       </aside>
 
       <main>
-        <header>
+        <header class="page-header">
           <div>
-            <p class="eyebrow">PERFORMANCE OVERVIEW</p>
-            <h1>마케팅 성과 대시보드</h1>
-            <p class="subtitle">핵심 광고 지표를 한눈에 확인하세요.</p>
+            <p class="eyebrow">PERFORMANCE OVERVIEW <span>·</span> BLACKYAK</p>
+            <h1>마케팅 성과</h1>
+            <p class="subtitle">정상을 향한 모든 캠페인의 움직임을 한눈에 확인하세요.</p>
           </div>
           <label class="period-control">
             조회 기간
@@ -33,26 +43,45 @@
           </label>
         </header>
 
-        <section id="overview" class="metric-grid" aria-label="핵심 지표"></section>
+        <section id="overview" class="metric-grid" aria-label="통합 지표"></section>
 
-        <section id="channels" class="panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">CHANNEL BREAKDOWN</p>
-              <h2>매체별 성과</h2>
+        <section id="trend" class="analytics-grid">
+          <article class="panel trend-panel">
+            <div class="panel-heading">
+              <div><p class="section-number">01 / PERFORMANCE TREND</p><h2>매출 및 광고비 추이</h2></div>
+              <div class="legend"><span><i class="revenue"></i>매출</span><span><i class="cost"></i>광고비</span></div>
             </div>
-            <span id="updated-at" class="updated-at"></span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>매체</th><th>노출</th><th>클릭</th><th>광고비</th><th>전환</th><th>매출</th><th>CTR</th><th>ROAS</th>
-                </tr>
-              </thead>
-              <tbody id="channel-rows"></tbody>
-            </table>
-          </div>
+            <div id="trend-chart" class="trend-chart" aria-label="매출 및 광고비 추이 그래프"></div>
+          </article>
+
+          <article class="panel efficiency-panel">
+            <div class="panel-heading">
+              <div><p class="section-number">02 / EFFICIENCY</p><h2>목표 ROAS 달성률</h2></div>
+            </div>
+            <div id="roas-gauge" class="gauge-wrap"></div>
+          </article>
+        </section>
+
+        <section id="channels" class="channel-grid">
+          <article class="panel funnel-panel">
+            <div class="panel-heading">
+              <div><p class="section-number">03 / CONVERSION FUNNEL</p><h2>광고 전환 퍼널</h2></div>
+            </div>
+            <div id="conversion-funnel" class="conversion-funnel"></div>
+          </article>
+
+          <article class="panel table-panel">
+            <div class="panel-heading">
+              <div><p class="section-number">04 / CHANNEL DETAIL</p><h2>매체별 성과</h2></div>
+              <span id="updated-at" class="updated-at"></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>매체</th><th>노출</th><th>클릭</th><th>광고비</th><th>전환</th><th>매출</th><th>CTR</th><th>ROAS</th></tr></thead>
+                <tbody id="channel-rows"></tbody>
+              </table>
+            </div>
+          </article>
         </section>
       </main>
     </div>
