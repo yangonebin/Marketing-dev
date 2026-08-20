@@ -160,6 +160,62 @@ function bindChartTooltip() {
   });
 }
 
-document.querySelector('#period').addEventListener('change', event => render(event.target.value));
 document.querySelector('#updated-at').textContent = `${new Date().toLocaleDateString('ko-KR')} 기준`;
-render('30');
+
+const periodTrigger = document.querySelector('#period-trigger');
+const periodPicker = document.querySelector('#period-picker');
+const startDate = document.querySelector('#start-date');
+const endDate = document.querySelector('#end-date');
+const periodSummary = document.querySelector('#period-summary');
+const periodDates = document.querySelector('#period-dates');
+let selectedPreset = 'yesterday';
+
+const toInputDate = date => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
+const addDays = (date, amount) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + amount);
+const formatDate = value => new Intl.DateTimeFormat('ko-KR', { month: '2-digit', day: '2-digit' }).format(new Date(`${value}T00:00:00`));
+
+function setDateRange(preset) {
+  const today = new Date();
+  const yesterday = addDays(today, -1);
+  let start = yesterday;
+  let end = yesterday;
+  if (['7', '30', '90'].includes(preset)) start = addDays(today, -Number(preset));
+  if (preset === 'this-month') { start = new Date(today.getFullYear(), today.getMonth(), 1); end = yesterday; }
+  if (preset === 'last-month') { start = new Date(today.getFullYear(), today.getMonth() - 1, 1); end = new Date(today.getFullYear(), today.getMonth(), 0); }
+  startDate.value = toInputDate(start);
+  endDate.value = toInputDate(end);
+}
+
+function closePeriodPicker() {
+  periodPicker.hidden = true;
+  periodTrigger.setAttribute('aria-expanded', 'false');
+}
+
+function applyPeriod() {
+  const labels = { yesterday: '어제', 7: '지난 7일', 30: '지난 30일', 90: '지난 90일', 'this-month': '이번 달', 'last-month': '지난 달', custom: '선택 기간' };
+  periodSummary.textContent = labels[selectedPreset];
+  periodDates.textContent = `${formatDate(startDate.value)} – ${formatDate(endDate.value)}`;
+  document.querySelectorAll('.period-presets button').forEach(button => button.classList.toggle('active', button.dataset.period === selectedPreset));
+  render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
+  closePeriodPicker();
+}
+
+periodTrigger.addEventListener('click', () => {
+  periodPicker.hidden = !periodPicker.hidden;
+  periodTrigger.setAttribute('aria-expanded', String(!periodPicker.hidden));
+});
+document.querySelectorAll('.period-presets button').forEach(button => button.addEventListener('click', () => {
+  selectedPreset = button.dataset.period;
+  if (selectedPreset !== 'custom') setDateRange(selectedPreset);
+  document.querySelectorAll('.period-presets button').forEach(item => item.classList.toggle('active', item === button));
+}));
+[startDate, endDate].forEach(input => input.addEventListener('change', () => { selectedPreset = 'custom'; }));
+document.querySelector('#period-apply').addEventListener('click', applyPeriod);
+document.querySelector('#period-cancel').addEventListener('click', closePeriodPicker);
+document.addEventListener('click', event => { if (!event.target.closest('.period-control')) closePeriodPicker(); });
+
+setDateRange('yesterday');
+applyPeriod();
