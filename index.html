@@ -35,13 +35,31 @@
             <h1>마케팅 성과</h1>
             <p class="subtitle">정상을 향한 모든 캠페인의 움직임을 한눈에 확인하세요.</p>
           </div>
-          <label class="period-control">
-            조회 기간
-            <select id="period" aria-label="조회 기간">
-              <option value="7">최근 7일</option>
-              <option value="30" selected>최근 30일</option>
-            </select>
-          </label>
+          <div class="period-control">
+            <span class="period-label">조회 기간</span>
+            <button id="period-trigger" class="period-trigger" type="button" aria-expanded="false" aria-controls="period-picker">
+              <span class="calendar-icon" aria-hidden="true"></span>
+              <strong id="period-summary">어제</strong>
+              <span class="period-dates" id="period-dates"></span>
+            </button>
+            <div id="period-picker" class="period-picker" hidden>
+              <div class="date-fields">
+                <label>시작일<input id="start-date" type="date" /></label>
+                <span aria-hidden="true">—</span>
+                <label>종료일<input id="end-date" type="date" /></label>
+              </div>
+              <div class="period-presets" aria-label="빠른 조회 기간">
+                <button type="button" data-period="yesterday" data-days="1">어제</button>
+                <button type="button" data-period="7" data-days="7">지난 7일</button>
+                <button type="button" data-period="30" data-days="30">지난 30일</button>
+                <button type="button" data-period="90" data-days="90">지난 90일</button>
+                <button type="button" data-period="this-month">이번 달</button>
+                <button type="button" data-period="last-month">지난 달</button>
+                <button type="button" data-period="custom">날짜 선택</button>
+              </div>
+              <div class="period-actions"><button id="period-cancel" type="button">취소</button><button id="period-apply" type="button">적용</button></div>
+            </div>
+          </div>
         </header>
 
         <section id="overview" class="metric-grid" aria-label="통합 지표"></section>
