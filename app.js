@@ -22,6 +22,7 @@ const won = new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW',
 const compactWon = new Intl.NumberFormat('ko-KR', { notation: 'compact', maximumFractionDigits: 1 });
 const number = new Intl.NumberFormat('ko-KR');
 const targetRoas = 300;
+let activeChannel = 'all';
 
 function makeTrendChart(period) {
   const { labels, revenue, cost } = trends[period];
@@ -49,70 +50,74 @@ function makeTrendChart(period) {
 }
 
 function render(period) {
-  const rows = datasets[period];
+  const sourceRows = datasets[period];
+  const rows = activeChannel === 'all'
+    ? sourceRows
+    : activeChannel === 'other'
+      ? sourceRows.filter(row => !['Google Ads', 'Meta', 'Naver'].includes(row.channel))
+      : sourceRows.filter(row => row.channel === activeChannel);
   const metrics = calculateMetrics(rows);
   const cards = [
-    ['총 광고비', metrics.cost, 'compact', `CPC ${won.format(metrics.cpc)}`, 'SPEND'],
-    ['총 전환', metrics.conversions, 'count', `CVR ${metrics.cvr.toFixed(2)}%`, 'CONVERSION'],
-    ['총 매출', metrics.revenue, 'compact', `CTR ${metrics.ctr.toFixed(2)}%`, 'REVENUE'],
-    ['통합 ROAS', metrics.roas, 'percent', `CPA ${won.format(metrics.cpa)}`, 'ROAS'],
+    ['노출수', metrics.impressions, 'number'],
+    ['클릭수', metrics.clicks, 'number'],
+    ['광고비', metrics.cost, 'currency'],
+    ['구매', metrics.conversions, 'number'],
+    ['매출', metrics.revenue, 'currency'],
+    ['CTR', metrics.ctr, 'percent'],
+    ['CPC', metrics.cpc, 'currency'],
+    ['CVR', metrics.cvr, 'percent'],
+    ['CPA', metrics.cpa, 'currency'],
+    ['ROAS', metrics.roas, 'percent'],
   ];
 
-  document.querySelector('#overview').innerHTML = cards.map(([label, value, format, detail, code], index) => `
-    <article class="metric-card ${index === 3 ? 'accent' : ''}">
-      <div class="metric-top"><span>${String(index + 1).padStart(2, '0')}</span><small>${code}</small></div>
-      <p class="metric-label">${label}</p><p class="metric-value" data-target="${value}" data-format="${format}">0</p>
-      <p class="metric-detail"><i>↗</i> ${detail}</p>
+  document.querySelector('#overview').innerHTML = cards.map(([label, value, format]) => `
+    <article class="metric-card ${label === 'ROAS' ? 'accent' : ''}">
+      <p class="metric-label">${label}</p>
+      <p class="metric-value" data-target="${value}" data-format="${format}">0</p>
     </article>`).join('');
-
-  document.querySelector('#trend-chart').innerHTML = `${makeTrendChart(period)}<div class="chart-tooltip" role="status" aria-live="polite"></div>`;
-  bindChartTooltip();
-
-  const achievement = Math.min(metrics.roas / targetRoas * 100, 100);
-  document.querySelector('#roas-gauge').innerHTML = `
-    <div class="semi-gauge">
-      <svg viewBox="0 0 220 125" role="img" aria-label="목표 ROAS 달성률 ${achievement.toFixed(0)}퍼센트">
-        <path class="gauge-track" pathLength="100" d="M20 108 A90 90 0 0 1 200 108" />
-        <path class="gauge-progress" pathLength="100" stroke-dasharray="${achievement} 100" d="M20 108 A90 90 0 0 1 200 108" />
-      </svg>
-      <div><strong><b data-target="${achievement}" data-format="gauge">0</b><small>%</small></strong><span>목표 ${targetRoas}%</span></div>
-    </div>
-    <div class="gauge-copy"><span>현재 ROAS</span><strong>${metrics.roas.toFixed(1)}%</strong><p>${achievement >= 100 ? '목표를 달성했습니다.' : `목표까지 ${(targetRoas - metrics.roas).toFixed(1)}%p 남았습니다.`}</p></div>`;
-
-  const funnelSteps = [
-    { label: '노출', value: metrics.impressions, rate: 100, className: 'impressions' },
-    { label: '클릭', value: metrics.clicks, rate: metrics.ctr, className: 'clicks' },
-    { label: '전환', value: metrics.conversions, rate: metrics.cvr, className: 'conversions' },
-  ];
-  document.querySelector('#conversion-funnel').innerHTML = `
-    <div class="funnel-shape" aria-hidden="true">
-      <svg viewBox="0 0 180 106">
-        <defs><linearGradient id="funnel-gradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7c6cff"/><stop offset="1" stop-color="#48d9ff"/></linearGradient></defs>
-        <polygon class="funnel-bar impressions" points="4,4 176,4 151,32 29,32"/>
-        <polygon class="funnel-bar clicks" points="33,39 147,39 132,67 48,67"/>
-        <polygon class="funnel-bar conversions" points="61,74 119,74 110,102 70,102"/>
-      </svg>
-    </div>
-    <div class="funnel-list">${funnelSteps.map((step, index) => `<div>
-      <span><i class="${step.className}"></i>${step.label}</span><strong>${compactWon.format(step.value)}</strong>
-      <small>${index === 0 ? '전체 도달' : `${index === 1 ? 'CTR' : 'CVR'} ${step.rate.toFixed(2)}%`}</small>
-    </div>`).join('')}</div>`;
-
-  document.querySelector('#channel-rows').innerHTML = rows.map(row => {
-    const item = calculateMetrics([row]);
-    return `<tr><td><span class="channel"><i class="channel-dot" style="background:${row.color}"></i>${row.channel}</span></td>
-      <td>${number.format(row.impressions)}</td><td>${number.format(row.clicks)}</td><td>${compactWon.format(row.cost)}</td>
-      <td>${number.format(row.conversions)}</td><td>${compactWon.format(row.revenue)}</td><td>${item.ctr.toFixed(2)}%</td><td><strong>${item.roas.toFixed(1)}%</strong></td></tr>`;
-  }).join('');
-
+  renderMediaOverview(rows, metrics.cost);
+  renderDailyTrend(period);
   runEntranceAnimations();
 }
 
+function renderMediaOverview(rows, totalCost) {
+  const colors = ['#48d9ff', '#7c6cff', '#ff7a93', '#62e2c2'];
+  const parts = rows.map((row, index) => ({ ...row, color: colors[index % colors.length], share: totalCost ? row.cost / totalCost * 100 : 0 }));
+  let offset = 0;
+  const stops = parts.map(item => {
+    const start = offset;
+    offset += item.share;
+    return `${item.color} ${start}% ${offset}%`;
+  }).join(', ');
+  document.querySelector('#media-overview').innerHTML = rows.length ? `
+    <div class="donut" style="background:conic-gradient(${stops})"><div><small>광고비</small><strong>${number.format(totalCost)}</strong></div></div>
+    <div class="media-list">${parts.map(item => `<div><span><i style="background:${item.color}"></i>${item.channel}</span><strong>${number.format(item.cost)} <em>${item.share.toFixed(1)}%</em></strong></div>`).join('')}</div>` : '<p class="empty-state">해당 매체 데이터가 없습니다.</p>';
+}
+
+function renderDailyTrend(period) {
+  const trend = trends[period];
+  const scale = activeChannel === 'all' ? 1 : activeChannel === 'other' ? 0 : activeChannel === 'Google Ads' ? .42 : activeChannel === 'Meta' ? .31 : .27;
+  const costs = trend.cost.map(value => value * scale);
+  const ctrs = trend.revenue.map((value, index) => costs[index] ? value / costs[index] * .45 : 0);
+  const width = 850, height = 250, left = 34, bottom = 34, top = 22;
+  const maxCost = Math.max(...costs, 1) * 1.15;
+  const maxCtr = Math.max(...ctrs, 1) * 1.2;
+  const step = (width - left * 2) / trend.labels.length;
+  const line = ctrs.map((value, index) => `${index ? 'L' : 'M'} ${left + step * index + step / 2} ${top + (height - top - bottom) * (1 - value / maxCtr)}`).join(' ');
+  document.querySelector('#daily-trend').innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="광고비 막대와 CTR 선 그래프">
+    ${[0,1,2,3].map(i => `<line class="daily-grid" x1="${left}" y1="${top + i * 55}" x2="${width-left}" y2="${top + i * 55}"/>`).join('')}
+    ${costs.map((value, index) => `<rect class="daily-bar" x="${left + step * index + step * .2}" y="${top + (height-top-bottom)*(1-value/maxCost)}" width="${step*.6}" height="${(height-top-bottom)*value/maxCost}" rx="4"/>`).join('')}
+    <path class="daily-line" d="${line}"/>
+    ${ctrs.map((value, index) => `<circle class="daily-point" cx="${left + step * index + step/2}" cy="${top+(height-top-bottom)*(1-value/maxCtr)}" r="3"/>`).join('')}
+    ${trend.labels.map((label,index) => `<text class="daily-label" x="${left+step*index+step/2}" y="${height-8}" text-anchor="middle">${label}</text>`).join('')}
+  </svg>`;
+}
+
 const formatAnimatedValue = (value, format) => {
-  if (format === 'compact') return compactWon.format(Math.round(value));
-  if (format === 'count') return `${number.format(Math.round(value))}건`;
+  if (format === 'number') return number.format(Math.round(value));
+  if (format === 'currency') return number.format(Math.round(value));
   if (format === 'percent') return `${value.toFixed(1)}%`;
-  return Math.round(value).toString();
+  return number.format(Math.round(value));
 };
 
 function animateCounter(element, duration = 1100) {
@@ -159,8 +164,6 @@ function bindChartTooltip() {
     area.addEventListener('blur', hide);
   });
 }
-
-document.querySelector('#updated-at').textContent = `${new Date().toLocaleDateString('ko-KR')} 기준`;
 
 const periodTrigger = document.querySelector('#period-trigger');
 const periodPicker = document.querySelector('#period-picker');
@@ -216,6 +219,11 @@ document.querySelectorAll('.period-presets button').forEach(button => button.add
 document.querySelector('#period-apply').addEventListener('click', applyPeriod);
 document.querySelector('#period-cancel').addEventListener('click', closePeriodPicker);
 document.addEventListener('click', event => { if (!event.target.closest('.period-control')) closePeriodPicker(); });
+document.querySelectorAll('.media-filter button').forEach(button => button.addEventListener('click', () => {
+  activeChannel = button.dataset.channel;
+  document.querySelectorAll('.media-filter button').forEach(item => item.classList.toggle('active', item === button));
+  render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
+}));
 
 setDateRange('yesterday');
 applyPeriod();
