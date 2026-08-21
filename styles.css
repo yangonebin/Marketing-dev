@@ -109,3 +109,62 @@ tbody tr { opacity: 0; animation: row-in .45s ease forwards; }tbody tr:nth-child
 @media (max-width: 1100px) { .metric-grid { grid-template-columns: repeat(2, 1fr); }.analytics-grid, .channel-grid { grid-template-columns: 1fr; }.channel-share { grid-template-columns: 145px minmax(160px, 1fr); } }
 @media (max-width: 760px) { .shell { grid-template-columns: 1fr; }.sidebar { position: static; width: 100%; height: auto; padding: 18px 22px; flex-direction: row; align-items: center; }.brand { width: 82px; height: auto; }.brand img { width: 100%; height: auto; }.sidebar nav, .sidebar-status { display: none; }.sidebar-note { margin: 0 0 0 auto; }main { padding: 32px 18px 50px; }.page-header { flex-direction: column; }.page-header h1 { font-size: 38px; }.period-control { width: 100%; }.period-picker { left: 0; right: auto; }.period-presets { grid-template-columns: repeat(2, 1fr); }.metric-grid { grid-template-columns: 1fr 1fr; }.metric-card { min-height: 155px; }.conversion-funnel { grid-template-columns: 1fr 1fr; }.share-list { width: 100%; } }
 @media (max-width: 450px) { .metric-grid { grid-template-columns: 1fr; }.panel { padding: 19px; }.legend { display: none; } }
+
+/* Compact dashboard proportions inspired by the supplied reference */
+.shell { grid-template-columns: 224px minmax(0, 1fr); }
+.sidebar { padding: 24px 18px 20px; }
+.brand { width: 116px; margin-left: 10px; }
+nav { gap: 5px; margin-top: 54px; }
+.nav-label { margin: 0 0 8px 12px; font-size: 9px; letter-spacing: .18em; }
+nav a { padding: 11px 12px; border: 0; border-radius: 10px; font-size: 13px; }
+nav a span { margin-right: 12px; font-size: 8px; }
+nav a.active, nav a:hover { background: rgba(124,108,255,.18); box-shadow: inset 0 0 0 1px rgba(158,174,255,.12); }
+.sidebar-status { padding: 12px; border-radius: 12px; }
+
+main { max-width: none; padding: 28px clamp(22px, 2.6vw, 42px) 44px; }
+.eyebrow, .section-number { font-size: 9px; letter-spacing: .14em; }
+h1 { margin: 11px 0 10px; font-size: clamp(28px, 3vw, 38px); letter-spacing: -.045em; }
+.subtitle { font-size: 13px; }
+.period-control { min-width: 220px; font-size: 10px; }
+.period-label { margin-bottom: 6px; }
+.period-trigger { min-height: 44px; border-radius: 11px; }
+.period-trigger strong { font-size: 12px; }
+.period-dates { font-size: 10px; }
+.period-picker { border-radius: 14px; }
+.date-fields input, .period-presets button, .period-actions button { border-radius: 9px; }
+
+.metric-grid { gap: 12px; margin: 28px 0 16px; }
+.metric-card { min-height: 136px; padding: 15px 16px; border-radius: 15px; }
+.metric-card.accent { border-top-width: 1px; }
+.metric-top { font-size: 8px; letter-spacing: .1em; }
+.metric-label { margin: 17px 0 7px; font-size: 12px; }
+.metric-value { font-size: clamp(26px, 2.2vw, 33px); letter-spacing: -.035em; }
+.metric-detail { display: inline-flex; align-items: center; margin: 12px 0 0; padding: 4px 9px; border-radius: 999px; color: #9da8bc; background: rgba(72,217,255,.08); font-size: 10px; }
+.metric-detail i { margin-right: 3px; }
+
+.analytics-grid, .channel-grid { gap: 16px; }
+.channel-grid { margin-top: 16px; }
+.panel { padding: 18px; border-radius: 16px; }
+h2 { margin-top: 7px; font-size: 18px; letter-spacing: -.03em; }
+.legend { gap: 12px; font-size: 10px; }
+.trend-chart { margin-top: 14px; min-height: 225px; }
+.gauge-wrap { min-height: 225px; padding-top: 14px; }
+.semi-gauge { width: min(190px, 100%); }
+.semi-gauge strong { font-size: 32px; }
+.conversion-funnel { min-height: 225px; padding-top: 14px; gap: 12px; }
+.funnel-shape { width: 158px; }
+.updated-at { font-size: 10px; }
+.table-wrap { margin-top: 16px; }
+table { font-size: 12px; }
+th { padding: 9px 8px; font-size: 10px; }
+td { padding: 12px 8px; }
+.channel { font-size: 12px; }
+
+@media (max-width: 760px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { padding: 16px 18px; }
+  .brand { width: 82px; margin-left: 0; }
+  main { padding: 26px 18px 42px; }
+  .page-header h1 { font-size: 30px; }
+  .metric-card { min-height: 132px; }
+}
