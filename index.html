@@ -32,8 +32,16 @@
         <header class="page-header">
           <div>
             <p class="eyebrow">PERFORMANCE OVERVIEW <span>·</span> BLACKYAK</p>
-            <h1>마케팅 성과</h1>
+            <h1>SUMMARY</h1>
             <p class="subtitle">정상을 향한 모든 캠페인의 움직임을 한눈에 확인하세요.</p>
+            <div class="media-filter" aria-label="매체 선택">
+              <strong>매체</strong>
+              <button class="active" type="button" data-channel="all">전체</button>
+              <button type="button" data-channel="Naver">네이버</button>
+              <button type="button" data-channel="Meta">메타</button>
+              <button type="button" data-channel="Google Ads">구글</button>
+              <button type="button" data-channel="other">기타</button>
+            </div>
           </div>
           <div class="period-control">
             <span class="period-label">조회 기간</span>
@@ -64,42 +72,20 @@
 
         <section id="overview" class="metric-grid" aria-label="통합 지표"></section>
 
-        <section id="trend" class="analytics-grid">
-          <article class="panel trend-panel">
+        <section id="trend" class="overview-grid">
+          <article id="channels" class="panel media-overview-panel">
             <div class="panel-heading">
-              <div><p class="section-number">01 / PERFORMANCE TREND</p><h2>매출 및 광고비 추이</h2></div>
-              <div class="legend"><span><i class="revenue"></i>매출</span><span><i class="cost"></i>광고비</span></div>
+              <div><p class="section-number">MEDIA OVERVIEW</p><h2>매체별 성과</h2><p class="panel-subtitle">기준: 선택 기간 광고비 비중</p></div>
+              <span class="metric-select"><i></i> 광고비</span>
             </div>
-            <div id="trend-chart" class="trend-chart" aria-label="매출 및 광고비 추이 그래프"></div>
+            <div id="media-overview" class="media-overview"></div>
           </article>
-
-          <article class="panel efficiency-panel">
+          <article id="branding-performance" class="panel daily-trend-panel">
             <div class="panel-heading">
-              <div><p class="section-number">02 / EFFICIENCY</p><h2>목표 ROAS 달성률</h2></div>
+              <div><p class="section-number">DAILY TREND</p><h2>일자별 트렌드</h2></div>
+              <div class="trend-selects"><span><i class="cost"></i>광고비</span><span><i class="ctr"></i>CTR</span></div>
             </div>
-            <div id="roas-gauge" class="gauge-wrap"></div>
-          </article>
-        </section>
-
-        <section id="channels" class="channel-grid">
-          <article class="panel funnel-panel">
-            <div class="panel-heading">
-              <div><p class="section-number">03 / CONVERSION FUNNEL</p><h2>광고 전환 퍼널</h2></div>
-            </div>
-            <div id="conversion-funnel" class="conversion-funnel"></div>
-          </article>
-
-          <article id="branding-performance" class="panel table-panel">
-            <div class="panel-heading">
-              <div><p class="section-number">04 / CHANNEL DETAIL</p><h2>매체별 성과</h2></div>
-              <span id="updated-at" class="updated-at"></span>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>매체</th><th>노출</th><th>클릭</th><th>광고비</th><th>전환</th><th>매출</th><th>CTR</th><th>ROAS</th></tr></thead>
-                <tbody id="channel-rows"></tbody>
-              </table>
-            </div>
+            <div id="daily-trend" class="daily-trend" aria-label="일자별 광고비 및 CTR 추이"></div>
           </article>
         </section>
       </main>
