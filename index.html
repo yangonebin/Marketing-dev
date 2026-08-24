@@ -19,6 +19,7 @@
           <a href="#trend"><span>02</span>성과 추이</a>
           <a href="#channels"><span>03</span>매체 분석</a>
           <a href="#branding-performance"><span>04</span>브랜딩/퍼포먼스</a>
+          <a href="#campaign-report"><span>05</span>캠페인 리포트</a>
         </nav>
 
         <div class="sidebar-status">
@@ -33,15 +34,6 @@
           <div>
             <p class="eyebrow">PERFORMANCE OVERVIEW <span>·</span> BLACKYAK</p>
             <h1>SUMMARY</h1>
-            <p class="subtitle">정상을 향한 모든 캠페인의 움직임을 한눈에 확인하세요.</p>
-            <div class="media-filter" aria-label="매체 선택">
-              <strong>매체</strong>
-              <button class="active" type="button" data-channel="all">전체</button>
-              <button type="button" data-channel="Naver">네이버</button>
-              <button type="button" data-channel="Meta">메타</button>
-              <button type="button" data-channel="Google Ads">구글</button>
-              <button type="button" data-channel="other">기타</button>
-            </div>
           </div>
           <div class="period-control">
             <span class="period-label">조회 기간</span>
@@ -70,6 +62,7 @@
           </div>
         </header>
 
+        <div id="overview-view" class="report-view">
         <section id="overview" class="metric-grid" aria-label="통합 지표"></section>
 
         <section id="trend" class="overview-grid">
@@ -87,6 +80,104 @@
             </div>
             <div id="daily-trend" class="daily-trend" aria-label="일자별 광고비 및 CTR 추이"></div>
           </article>
+        </section>
+        </div>
+
+        <section id="campaign-report" class="report-view campaign-report" hidden aria-labelledby="campaign-report-title">
+          <nav class="report-tabs" aria-label="캠페인 리포트 세부 메뉴">
+            <button class="active" type="button" data-report-tab="summary" aria-selected="true">Summary</button>
+            <button type="button" data-report-tab="media" aria-selected="false">매체 데이터</button>
+            <button type="button" data-report-tab="creative" aria-selected="false">소재</button>
+            <button type="button" data-report-tab="mix" aria-selected="false">미디어믹스</button>
+          </nav>
+          <div id="campaign-summary-tab" class="campaign-tab-panel">
+          <div class="campaign-toolbar">
+            <div class="campaign-title-area">
+              <p class="section-number">CAMPAIGN REPORT</p>
+              <div class="campaign-title-row">
+                <h2 id="campaign-report-title">캠페인 성과 리포트</h2>
+                <label class="campaign-primary-filter"><span>캠페인</span><select id="campaign-select"><option value="all">전체 캠페인</option><option value="summit">SUMMIT 2026</option><option value="trail">TRAIL RUNNING</option><option value="season">SEASON OFF</option></select></label>
+              </div>
+              <p class="panel-subtitle">캠페인별 핵심 성과를 비교하고 흐름을 확인하세요. · 목업 데이터</p>
+            </div>
+            <div class="campaign-filters" aria-label="캠페인 리포트 필터">
+              <label>사업부<select id="campaign-business"><option value="all">전체 사업부</option></select></label>
+              <div class="campaign-media-control">
+                <span>매체</span>
+                <button id="campaign-media-trigger" type="button" aria-expanded="false" aria-controls="campaign-media-options"><strong id="campaign-media-summary">전체 매체</strong><i></i></button>
+                <div id="campaign-media-options" class="campaign-media-options" hidden></div>
+              </div>
+            </div>
+          </div>
+          <div id="campaign-kpis" class="campaign-kpis" aria-label="캠페인 요약 지표"></div>
+          <div class="campaign-content-grid">
+            <article class="panel campaign-trend-panel">
+              <div class="panel-heading campaign-trend-heading">
+                <div><p class="section-number">PERFORMANCE TREND</p><h2>성과 추이</h2><p class="panel-subtitle">상단 지표 카드를 최대 3개까지 선택할 수 있습니다.</p></div>
+                <div class="trend-controls">
+                  <div class="time-toggle" aria-label="시간 기준"><button class="active" type="button" data-time-unit="daily">일자별</button><button type="button" data-time-unit="weekly" title="월요일부터 일요일까지를 한 주로 집계">주차별</button></div>
+                  <label>사업부<select id="business-unit"><option value="all">전체 사업부</option><option value="outdoor">아웃도어</option><option value="sports">스포츠</option><option value="kids">키즈</option></select></label>
+                </div>
+              </div>
+              <div id="trend-series-legend" class="trend-series-legend" aria-label="선택 지표와 축 범위"></div>
+              <div id="campaign-trend-chart" class="campaign-trend-chart" aria-label="선택한 캠페인 지표 추이"></div>
+            </article>
+            <article class="panel campaign-status-panel"><div><p class="section-number">CAMPAIGN STATUS</p><h2>운영 현황</h2></div><div id="campaign-status" class="campaign-status"></div></article>
+          </div>
+          <article class="panel campaign-table-panel weekly-ga-panel">
+            <div class="panel-heading"><div><p class="section-number">WEEKLY GA PERFORMANCE</p><h2>주차별 GA 성과</h2><p class="panel-subtitle">월요일–일요일 기준 · 각 지표 하단은 직전 주차 대비 증감률</p></div><span class="updated-at">단위 · 명, 건, 원, %</span></div>
+            <div class="table-wrap"><table class="weekly-ga-table"><thead><tr><th>주차</th><th>세션 수</th><th>평균 세션 시간</th><th>SCROLL 이벤트</th><th>총 사용자</th><th>새 사용자</th><th>새 사용자 비중</th><th>장바구니 추가</th><th>구매수</th><th>총수익</th><th>전환율<small>구매/세션</small></th><th>장바구니 전환율<small>장바구니/세션</small></th></tr></thead><tbody id="campaign-table-body"></tbody></table></div>
+          </article>
+          </div>
+          <div id="campaign-media-tab" class="campaign-tab-panel media-data-report" hidden>
+            <div class="media-report-header">
+              <div><p class="section-number">MEDIA DATA REPORT</p><h2>매체 데이터</h2><p class="panel-subtitle">매체별 성과를 요약·주차·일자 기준으로 확인하세요. · 목업 데이터</p></div>
+              <span class="media-report-badge">3 SECTIONS</span>
+            </div>
+
+            <article class="panel media-performance-panel">
+              <div class="panel-heading"><div><p class="section-number">01 · MEDIA PERFORMANCE</p><h2>매체별 성과</h2><p class="panel-subtitle">선택 기간 내 매체별 핵심 지표 비교</p></div><span class="updated-at">단위 · 원, 건, %</span></div>
+              <div class="performance-progress-row"><div class="business-progress-block">
+              <div class="business-progress-heading"><div><p class="section-number">BUSINESS GOAL PROGRESS</p><h3>사업부별 목표 진척률</h3></div><small>목표 100% 기준</small></div>
+              <div class="media-performance-cards business-progress-cards">
+                <article class="business-progress-card"><div class="business-card-head"><span><i style="background:#48d9ff"></i>MKT</span><strong>날짜 진척률 77%</strong></div><div class="business-metrics"><div class="date-progress-metric"><span>날짜 진척률 <b>77%</b></span><i><em style="--progress:77%"></em></i></div><div><span>광고비 <b>92%</b></span><i><em style="--progress:92%"></em></i></div><div><span>CPM <b>96%</b></span><i><em style="--progress:96%"></em></i></div><div><span>CTR <b>106%</b></span><i><em style="--progress:100%"></em></i></div><div><span>CPV <b>103%</b></span><i><em style="--progress:100%"></em></i></div><div><span>ROAS <b>108%</b></span><i><em style="--progress:100%"></em></i></div></div></article>
+                <article class="business-progress-card"><div class="business-card-head"><span><i style="background:#ff8ca2"></i>PERF</span><strong>날짜 진척률 77%</strong></div><div class="business-metrics"><div class="date-progress-metric"><span>날짜 진척률 <b>77%</b></span><i><em style="--progress:77%"></em></i></div><div><span>광고비 <b>88%</b></span><i><em style="--progress:88%"></em></i></div><div><span>CPM <b>91%</b></span><i><em style="--progress:91%"></em></i></div><div><span>CTR <b>103%</b></span><i><em style="--progress:100%"></em></i></div><div><span>CPV <b>101%</b></span><i><em style="--progress:100%"></em></i></div><div><span>ROAS <b>107%</b></span><i><em style="--progress:100%"></em></i></div></div></article>
+              </div>
+              </div><section class="goal-kpi-scoreboard compact" aria-labelledby="goal-kpi-title"><div class="goal-kpi-heading"><div><p class="section-number">GOAL KPI GAP</p><h2 id="goal-kpi-title">목표별 KPI GAP</h2></div></div><div class="goal-kpi-grid"><article style="--goal-color:#48d9ff"><div class="goal-kpi-top"><span>REACH · CPM</span></div><div class="goal-kpi-value"><strong>+500원</strong></div><div class="goal-kpi-meta"><span>목표 <b>2,000원</b></span><span>달성 <b>2,500원</b></span></div></article><article style="--goal-color:#a99eff"><div class="goal-kpi-top"><span>VIEW · CPV</span></div><div class="goal-kpi-value"><strong>−8원</strong></div><div class="goal-kpi-meta"><span>목표 <b>80원</b></span><span>달성 <b>72원</b></span></div></article><article style="--goal-color:#ff8ca2"><div class="goal-kpi-top"><span>TRAFFIC · CTR</span></div><div class="goal-kpi-value"><strong>+0.32%p</strong></div><div class="goal-kpi-meta"><span>목표 <b>3.00%</b></span><span>달성 <b>3.32%</b></span></div></article><article style="--goal-color:#62e2c2"><div class="goal-kpi-top"><span>CONVERSION · ROAS</span></div><div class="goal-kpi-value"><strong>+30.2%p</strong></div><div class="goal-kpi-meta"><span>목표 <b>300.0%</b></span><span>달성 <b>330.2%</b></span></div></article></div></section></div>
+              <div class="table-wrap"><table class="media-detail-table">
+                <thead>
+                  <tr class="media-group-head"><th colspan="5" class="attribute-group"><span>01</span>속성</th><th colspan="9" class="media-metric-group"><span>02</span>매체 데이터</th><th colspan="5" class="purchase-group"><span>03</span>구매 데이터</th></tr>
+                  <tr><th>사업부</th><th>목표</th><th>플랫폼</th><th>매체</th><th>기간</th><th>광고비</th><th>노출</th><th>클릭</th><th>조회</th><th>CPM</th><th>CPC</th><th>CPV</th><th>CTR</th><th>VTR</th><th>구매수</th><th>총수익</th><th>CPO</th><th>CVR</th><th>ROAS</th></tr>
+                </thead>
+                <tbody>
+                  <tr class="media-result-row"><td>MKT</td><td>Reach</td><td>YouTube</td><td><strong>VRC</strong></td><td>8/1–8/23</td><td>8,600,000</td><td>236,000</td><td>7,840</td><td>118,000</td><td>36,441</td><td>1,097</td><td>73</td><td>3.32%</td><td>50.00%</td><td>322</td><td>28,400,000</td><td>26,708</td><td>4.11%</td><td>330.2%</td></tr>
+                  <tr class="media-progress-row"><td colspan="5"><strong>목표 대비</strong><span>진척률 / GAP</span></td><td>▲ 92%</td><td>▲ 108%</td><td>▲ 104%</td><td>▲ 112%</td><td>▼ 96%</td><td>▼ 94%</td><td>▲ 103%</td><td>▲ 106%</td><td>▲ 109%</td><td>▲ 105%</td><td>▲ 118%</td><td>▼ 93%</td><td>▲ 107%</td><td>▲ 121%</td></tr>
+                  <tr class="media-result-row"><td>MKT</td><td>View</td><td>YouTube</td><td><strong>VVC</strong></td><td>8/1–8/23</td><td>6,900,000</td><td>214,000</td><td>6,360</td><td>96,400</td><td>32,243</td><td>1,085</td><td>72</td><td>2.97%</td><td>45.05%</td><td>248</td><td>21,100,000</td><td>27,823</td><td>3.90%</td><td>305.8%</td></tr>
+                  <tr class="media-progress-row"><td colspan="5"><strong>목표 대비</strong><span>달성률</span></td><td>▲ 88%</td><td>▲ 102%</td><td>▼ 97%</td><td>▲ 105%</td><td>▼ 91%</td><td>▼ 95%</td><td>▲ 101%</td><td>▲ 103%</td><td>▼ 98%</td><td>▲ 101%</td><td>▲ 109%</td><td>▼ 96%</td><td>▲ 102%</td><td>▲ 114%</td></tr>
+                  <tr class="media-result-row"><td>MKT</td><td>Traffic</td><td>Meta</td><td><strong>Traffic</strong></td><td>8/1–8/23</td><td>5,700,000</td><td>148,000</td><td>4,910</td><td>72,100</td><td>38,514</td><td>1,161</td><td>79</td><td>3.32%</td><td>48.72%</td><td>191</td><td>16,800,000</td><td>29,843</td><td>3.89%</td><td>294.7%</td></tr>
+                  <tr class="media-progress-row"><td colspan="5"><strong>목표 대비</strong><span>달성률</span></td><td>▲ 95%</td><td>▲ 111%</td><td>▲ 107%</td><td>▲ 106%</td><td>▼ 98%</td><td>▼ 96%</td><td>▲ 104%</td><td>▲ 108%</td><td>▲ 103%</td><td>▲ 99%</td><td>▲ 106%</td><td>▼ 97%</td><td>▲ 104%</td><td>▲ 110%</td></tr>
+                  <tr class="media-result-row"><td>PERF</td><td>Conversion</td><td>Naver</td><td><strong>SA</strong></td><td>8/1–8/23</td><td>4,200,000</td><td>173,000</td><td>4,120</td><td>88,700</td><td>24,277</td><td>1,019</td><td>47</td><td>2.38%</td><td>51.27%</td><td>156</td><td>12,700,000</td><td>26,923</td><td>3.79%</td><td>302.4%</td></tr>
+                  <tr class="media-progress-row"><td colspan="5"><strong>목표 대비</strong><span>달성률</span></td><td>▲ 90%</td><td>▲ 104%</td><td>▼ 99%</td><td>▲ 108%</td><td>▲ 101%</td><td>▼ 92%</td><td>▲ 105%</td><td>▼ 98%</td><td>▲ 106%</td><td>▲ 103%</td><td>▲ 111%</td><td>▼ 95%</td><td>▲ 101%</td><td>▲ 108%</td></tr>
+                </tbody>
+              </table></div>
+            </article>
+
+            <article class="panel media-weekly-panel">
+              <div class="panel-heading"><div><p class="section-number">02 · WEEKLY MEDIA PERFORMANCE</p><h2>주차별 매체 성과</h2><p class="panel-subtitle">월요일–일요일 기준 매체 성과 변화</p></div><span class="updated-at">직전 주차 대비</span></div>
+              <div class="table-wrap"><table><thead><tr><th>주차</th><th>매체</th><th>광고비</th><th>노출</th><th>클릭</th><th>CTR</th><th>구매</th><th>매출</th><th>ROAS</th></tr></thead><tbody><tr><td><strong>26-08-10 주차</strong></td><td>Google Ads</td><td>2,040,000</td><td>56,800</td><td>1,890</td><td>3.3%</td><td>76</td><td>6,710,000</td><td>328.9%</td></tr><tr><td><strong>26-08-17 주차</strong></td><td>Google Ads</td><td>2,210,000</td><td>61,400</td><td>2,060</td><td>3.4%</td><td>84</td><td>7,420,000</td><td>335.7%</td></tr><tr><td><strong>26-08-17 주차</strong></td><td>Meta</td><td>2,870,000</td><td>98,600</td><td>2,740</td><td>2.8%</td><td>108</td><td>8,930,000</td><td>311.1%</td></tr></tbody></table></div>
+            </article>
+
+            <article class="panel media-daily-panel">
+              <div class="panel-heading"><div><p class="section-number">03 · DAILY MEDIA PERFORMANCE</p><h2>일자별 매체 성과</h2><p class="panel-subtitle">최근 일자 기준 상세 실적</p></div><div class="media-mini-legend"><span><i style="background:#48d9ff"></i>광고비</span><span><i style="background:#ff8ca2"></i>매출</span></div></div>
+              <div class="media-daily-layout"><div class="media-daily-chart" aria-label="일자별 광고비와 매출 목업 차트"><div style="--bar:44%"><i></i><b></b><span>8/20</span></div><div style="--bar:61%"><i></i><b></b><span>8/21</span></div><div style="--bar:53%"><i></i><b></b><span>8/22</span></div><div style="--bar:76%"><i></i><b></b><span>8/23</span></div><div style="--bar:88%"><i></i><b></b><span>8/24</span></div></div><div class="table-wrap"><table><thead><tr><th>일자</th><th>매체</th><th>광고비</th><th>클릭</th><th>구매</th><th>매출</th><th>ROAS</th></tr></thead><tbody><tr><td>8/23</td><td>Meta</td><td>420,000</td><td>418</td><td>17</td><td>1,310,000</td><td>311.9%</td></tr><tr><td>8/24</td><td>Google Ads</td><td>360,000</td><td>329</td><td>14</td><td>1,220,000</td><td>338.9%</td></tr></tbody></table></div></div>
+            </article>
+          </div>
+          <div id="campaign-tab-placeholder" class="campaign-tab-panel campaign-tab-placeholder" hidden>
+            <span id="campaign-tab-index">02</span>
+            <p class="section-number">CAMPAIGN REPORT</p>
+            <h2 id="campaign-tab-title">매체 데이터</h2>
+            <p>상세 리포트 영역을 준비하고 있습니다.</p>
+          </div>
         </section>
       </main>
     </div>
