@@ -33,19 +33,15 @@ const campaignRows = [
 const campaignKpiDefinitions = [
   { key: 'impressions', label: '노출수', goal: 92, yoy: 108 }, { key: 'clicks', label: '클릭수', goal: 86, yoy: 104 }, { key: 'views', label: '조회수', goal: 78, yoy: 112 },
   { key: 'cost', label: '비용', goal: 81, yoy: 96 }, { key: 'conversions', label: '구매(GA)', goal: 88, yoy: 109 }, { key: 'revenue', label: '매출액(GA)', goal: 95, yoy: 118 },
-  { key: 'ctm', label: 'CTM', goal: 84, yoy: 103 }, { key: 'ctr', label: 'CTR', goal: 91, yoy: 106 }, { key: 'cpv', label: 'CPV', goal: 76, yoy: 98 },
+  { key: 'cpm', label: 'CPM', goal: 84, yoy: 103 }, { key: 'ctr', label: 'CTR', goal: 91, yoy: 106 }, { key: 'cpv', label: 'CPV', goal: 76, yoy: 98 },
   { key: 'purchaseRate', label: '구매전환율(GA)', goal: 87, yoy: 111 }, { key: 'cpo', label: 'CPO', goal: 82, yoy: 94 }, { key: 'roas', label: 'ROAS', goal: 97, yoy: 121 },
-];
-const weeklyGaRows = [
-  { weekStart: '26-07-27 주차', weekRange: '7/27–8/2', sessions: 184520, duration: 172, scrolls: 96240, users: 142860, newUsers: 101430, carts: 6840, purchases: 2940, revenue: 148200000 },
-  { weekStart: '26-08-03 주차', weekRange: '8/3–8/9', sessions: 196840, duration: 181, scrolls: 105720, users: 151230, newUsers: 106590, carts: 7290, purchases: 3180, revenue: 161700000 },
-  { weekStart: '26-08-10 주차', weekRange: '8/10–8/16', sessions: 191360, duration: 176, scrolls: 101880, users: 147640, newUsers: 102780, carts: 7060, purchases: 3070, revenue: 156400000 },
-  { weekStart: '26-08-17 주차', weekRange: '8/17–8/23', sessions: 207920, duration: 188, scrolls: 114360, users: 159810, newUsers: 113720, carts: 7820, purchases: 3460, revenue: 179800000 },
 ];
 const trendColors = ['#48d9ff', '#ff8ca2', '#a99eff'];
 let selectedTrendMetrics = ['cost', 'revenue'];
 let trendTimeUnit = 'daily';
-let selectedCampaignMedia = new Set(['Google Ads', 'Meta', 'Naver']);
+let campaignMediaOptions = [];
+let selectedCampaignMedia = new Set();
+let campaignMetricRequestId = 0;
 
 function makeTrendChart(period) {
   const { labels, revenue, cost } = trends[period];
@@ -173,39 +169,67 @@ function renderCampaignReport() {
   const rows = campaignRows.filter(row => (campaign === 'all' || row.key === campaign) && (business === 'all' || row.business === business) && selectedCampaignMedia.has(row.channel)).map(row => ({ ...row, impressions: Math.round(row.impressions * periodFactor), views: Math.round(row.views * periodFactor), clicks: Math.round(row.clicks * periodFactor), cost: Math.round(row.cost * periodFactor), conversions: Math.round(row.conversions * periodFactor), revenue: Math.round(row.revenue * periodFactor) }));
   const metrics = calculateMetrics(rows);
   const views = rows.reduce((sum, row) => sum + row.views, 0);
-  const ctm = metrics.impressions ? metrics.cost / metrics.impressions * 1000 : 0;
+  const cpm = metrics.impressions ? metrics.cost / metrics.impressions * 1000 : 0;
   const cpv = views ? metrics.cost / views : 0;
   const purchaseRate = metrics.clicks ? metrics.conversions / metrics.clicks * 100 : 0;
   const cpo = metrics.conversions ? metrics.cost / metrics.conversions : 0;
-  const kpiValues = { impressions: metrics.impressions, clicks: metrics.clicks, views, cost: metrics.cost, conversions: metrics.conversions, revenue: metrics.revenue, ctm, ctr: metrics.ctr, cpv, purchaseRate, cpo, roas: metrics.roas };
+  const kpiValues = { impressions: metrics.impressions, clicks: metrics.clicks, views, cost: metrics.cost, conversions: metrics.conversions, revenue: metrics.revenue, cpm, ctr: metrics.ctr, cpv, purchaseRate, cpo, roas: metrics.roas };
   const formatKpi = (key, value) => ['ctr', 'purchaseRate', 'roas'].includes(key) ? `${value.toFixed(key === 'roas' ? 1 : 2)}%` : number.format(Math.round(value));
   document.querySelector('#campaign-kpis').innerHTML = campaignKpiDefinitions.map(({ key, label, goal, yoy }) => `<article class="campaign-kpi ${label === 'ROAS' ? 'accent' : ''} ${selectedTrendMetrics.includes(key) ? 'selected' : ''}" role="button" tabindex="0" data-kpi-key="${key}" aria-pressed="${selectedTrendMetrics.includes(key)}"><span>${label}</span><strong>${formatKpi(key, kpiValues[key])}</strong><div class="kpi-progress"><small class="${goal >= 100 ? 'positive' : 'negative'}"><b>${goal >= 100 ? '▲' : '▼'} ${goal}%</b> 목표 대비</small><small class="${yoy >= 100 ? 'positive' : 'negative'}"><b>${yoy >= 100 ? '▲' : '▼'} ${yoy}%</b> YoY 대비</small></div></article>`).join('');
   renderCampaignTrend(rows, kpiValues);
 
-  const active = rows.filter(row => row.status === '운영중').length;
-  document.querySelector('#campaign-status').innerHTML = `<div class="status-ring" style="--progress:${rows.length ? active / rows.length * 100 : 0}%"><div><strong>${active}</strong><small>운영중</small></div></div><dl><div><dt>전체</dt><dd>${rows.length}개</dd></div><div><dt>운영중</dt><dd>${active}개</dd></div><div><dt>종료</dt><dd>${rows.length-active}개</dd></div></dl>`;
-  renderWeeklyGaTable(getPeriodDayCount());
+  document.querySelector('#campaign-table-body').innerHTML = '<tr><td colspan="12" class="empty-state">GA 데이터 불러오는 중…</td></tr>';
+  loadCampaignMediaMetrics();
+}
+
+async function loadCampaignMediaMetrics() {
+  const campaign = document.querySelector('#campaign-select').value;
+  const business = document.querySelector('#campaign-business').value;
+  const requestId = ++campaignMetricRequestId;
+  const mediaKeys = ['impressions', 'clicks', 'views', 'cost', 'cpm', 'ctr', 'cpv', 'conversions', 'revenue', 'purchaseRate', 'cpo', 'roas'];
+  mediaKeys.forEach(key => document.querySelector(`[data-kpi-key="${key}"]`)?.classList.add('loading'));
+  try {
+    const params = new URLSearchParams({ campaign, business, media: [...selectedCampaignMedia].join(','), start: startDate.value, end: endDate.value });
+    const response = await fetch(`/api/campaign-media-metrics?${params}`, { headers: { Accept: 'application/json' } });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '매체 데이터를 불러오지 못했습니다.');
+    if (requestId !== campaignMetricRequestId) return;
+    const format = (key, value) => ['ctr', 'purchaseRate', 'roas'].includes(key) ? `${value.toFixed(key === 'roas' ? 1 : 2)}%` : number.format(Math.round(value));
+    mediaKeys.forEach(key => {
+      const card = document.querySelector(`[data-kpi-key="${key}"]`);
+      if (!card) return;
+      card.classList.remove('loading', 'load-error');
+      card.querySelector('strong').textContent = format(key, result.metrics[key]);
+      card.querySelector('.kpi-progress').innerHTML = `<small class="actual-data">BigQuery · ${result.startDate}–${result.endDate}</small>`;
+    });
+    renderCampaignTrend(result.trend);
+    renderWeeklyGaTable(result.weeklyGa);
+  } catch (error) {
+    if (requestId !== campaignMetricRequestId) return;
+    mediaKeys.forEach(key => {
+      const card = document.querySelector(`[data-kpi-key="${key}"]`);
+      if (!card) return;
+      card.classList.remove('loading');
+      card.classList.add('load-error');
+      card.querySelector('strong').textContent = '조회 실패';
+      card.querySelector('.kpi-progress').innerHTML = `<small class="actual-data">${error.message}</small>`;
+    });
+    document.querySelector('#campaign-table-body').innerHTML = `<tr><td colspan="12" class="empty-state">${error.message}</td></tr>`;
+  }
 }
 
 function updateCampaignDrilldown(level = 'campaign') {
-  const campaignSelect = document.querySelector('#campaign-select');
   const businessSelect = document.querySelector('#campaign-business');
-  const campaign = campaignSelect.value;
   const previousBusiness = businessSelect.value;
-  const campaignScope = campaignRows.filter(row => campaign === 'all' || row.key === campaign);
-  const businesses = [...new Map(campaignScope.map(row => [row.business, row.businessLabel])).entries()];
-  businessSelect.innerHTML = `<option value="all">전체 사업부</option>${businesses.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}`;
-  businessSelect.value = level === 'campaign' && businesses.length === 1 ? businesses[0][0] : businesses.some(([value]) => value === previousBusiness) ? previousBusiness : 'all';
-  const business = businessSelect.value;
-  const media = [...new Set(campaignScope.filter(row => business === 'all' || row.business === business).map(row => row.channel))];
-  selectedCampaignMedia = new Set(media);
-  renderCampaignMediaOptions(media);
+  businessSelect.value = ['all', 'MKT', 'PERF'].includes(previousBusiness) ? previousBusiness : 'all';
+  renderCampaignMediaOptions(campaignMediaOptions);
   renderCampaignReport();
 }
 
 function renderCampaignMediaOptions(media) {
+  const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
   const options = document.querySelector('#campaign-media-options');
-  options.innerHTML = `<label class="select-all"><input type="checkbox" value="all" ${selectedCampaignMedia.size === media.length ? 'checked' : ''}><span>전체 매체</span></label>${media.map(channel => `<label><input type="checkbox" value="${channel}" ${selectedCampaignMedia.has(channel) ? 'checked' : ''}><span>${channel}</span></label>`).join('')}`;
+  options.innerHTML = `<label class="select-all"><input type="checkbox" value="all" ${media.length && selectedCampaignMedia.size === media.length ? 'checked' : ''}><span>전체 매체</span></label>${media.map(channel => `<label><input type="checkbox" value="${escapeHtml(channel)}" ${selectedCampaignMedia.has(channel) ? 'checked' : ''}><span>${escapeHtml(channel)}</span></label>`).join('')}`;
   const summary = document.querySelector('#campaign-media-summary');
   summary.textContent = selectedCampaignMedia.size === media.length ? '전체 매체' : selectedCampaignMedia.size === 1 ? [...selectedCampaignMedia][0] : `${selectedCampaignMedia.size}개 매체`;
 }
@@ -221,29 +245,41 @@ function handleCampaignMediaChange(input) {
   renderCampaignReport();
 }
 
-function renderWeeklyGaTable(periodDays = 30) {
+function renderWeeklyGaTable(rows = []) {
+  const tableBody = document.querySelector('#campaign-table-body');
+  if (!rows.length) {
+    tableBody.innerHTML = '<tr><td colspan="12" class="empty-state">선택한 조건의 GA 주차 데이터가 없습니다.</td></tr>';
+    return;
+  }
   const delta = (current, previous, invert = false) => {
-    if (!previous) return '<small class="ga-delta neutral">기준 주차</small>';
+    if (previous === undefined || previous === null || previous === 0) return '<small class="ga-delta neutral">기준 주차</small>';
     const change = (current - previous) / previous * 100;
     const positive = invert ? change <= 0 : change >= 0;
     return `<small class="ga-delta ${positive ? 'up' : 'down'}">${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(1)}%</small>`;
   };
   const duration = seconds => `${Math.floor(seconds / 60)}분 ${String(seconds % 60).padStart(2, '0')}초`;
   const cell = (value, comparison, formatted = number.format(value), invert = false) => `<td><strong>${formatted}</strong>${delta(value, comparison, invert)}</td>`;
-  const visibleRows = weeklyGaRows.slice(-Math.max(1, Math.min(weeklyGaRows.length, Math.ceil(periodDays / 7))));
-  document.querySelector('#campaign-table-body').innerHTML = visibleRows.map((row, index) => {
-    const originalIndex = weeklyGaRows.indexOf(row);
-    const previous = weeklyGaRows[originalIndex - 1];
-    const newUserShare = row.newUsers / row.users * 100;
-    const previousNewUserShare = previous ? previous.newUsers / previous.users * 100 : 0;
-    const conversionRate = row.purchases / row.sessions * 100;
-    const previousConversionRate = previous ? previous.purchases / previous.sessions * 100 : 0;
-    const cartRate = row.carts / row.sessions * 100;
-    const previousCartRate = previous ? previous.carts / previous.sessions * 100 : 0;
-    const end = endDate?.value ? new Date(`${endDate.value}T00:00:00`) : new Date();
-    const endDay = end.getDay();
-    const latestMonday = addDays(end, -(endDay === 0 ? 6 : endDay - 1));
-    const monday = addDays(latestMonday, (index - visibleRows.length + 1) * 7);
+  const selectedStart = new Date(`${startDate.value}T00:00:00`);
+  const selectedEnd = new Date(`${endDate.value}T00:00:00`);
+  const visibleRows = rows.filter(row => {
+    const monday = new Date(`${row.weekStart}T00:00:00`);
+    const sunday = addDays(monday, 6);
+    return monday <= selectedEnd && sunday >= selectedStart;
+  });
+  if (!visibleRows.length) {
+    tableBody.innerHTML = '<tr><td colspan="12" class="empty-state">선택한 기간의 GA 주차 데이터가 없습니다.</td></tr>';
+    return;
+  }
+  tableBody.innerHTML = visibleRows.map(row => {
+    const originalIndex = rows.indexOf(row);
+    const previous = rows[originalIndex - 1];
+    const newUserShare = row.users ? row.newUsers / row.users * 100 : 0;
+    const previousNewUserShare = previous?.users ? previous.newUsers / previous.users * 100 : undefined;
+    const conversionRate = row.sessions ? row.purchases / row.sessions * 100 : 0;
+    const previousConversionRate = previous?.sessions ? previous.purchases / previous.sessions * 100 : undefined;
+    const cartRate = row.sessions ? row.carts / row.sessions * 100 : 0;
+    const previousCartRate = previous?.sessions ? previous.carts / previous.sessions * 100 : undefined;
+    const monday = new Date(`${row.weekStart}T00:00:00`);
     const sunday = addDays(monday, 6);
     const weekStart = `${String(monday.getFullYear()).slice(-2)}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')} 주차`;
     const weekRange = `${monday.getMonth() + 1}/${monday.getDate()}–${sunday.getMonth() + 1}/${sunday.getDate()}`;
@@ -251,29 +287,49 @@ function renderWeeklyGaTable(periodDays = 30) {
   }).join('');
 }
 
-function renderCampaignTrend(rows, totals) {
+function renderCampaignTrend(rows) {
   const chart = document.querySelector('#campaign-trend-chart');
   if (!rows.length || !selectedTrendMetrics.length) {
     chart.innerHTML = `<p class="empty-state">${rows.length ? '표시할 지표 카드를 선택하세요.' : '선택한 조건의 추이 데이터가 없습니다.'}</p>`;
     document.querySelector('#trend-series-legend').innerHTML = '';
     return;
   }
-  const periodDays = getPeriodDayCount();
-  const pointCount = trendTimeUnit === 'daily' ? Math.min(periodDays, 31) : Math.min(Math.ceil(periodDays / 7), 13);
-  const shape = Array.from({ length: pointCount }, (_, index) => {
-    if (pointCount === 1) return 1;
-    const progress = index / (pointCount - 1);
-    return .58 + progress * .34 + Math.sin(index * 1.65) * .08;
+  const sumKeys = ['impressions', 'clicks', 'views', 'cost', 'conversions', 'revenue'];
+  const calculateDerived = item => ({
+    ...item,
+    cpm: item.impressions ? item.cost / item.impressions * 1000 : 0,
+    ctr: item.impressions ? item.clicks / item.impressions * 100 : 0,
+    cpv: item.views ? item.cost / item.views : 0,
+    purchaseRate: item.clicks ? item.conversions / item.clicks * 100 : 0,
+    cpo: item.conversions ? item.cost / item.conversions : 0,
+    roas: item.cost ? item.revenue / item.cost * 100 : 0,
   });
-  const labels = makeTrendDateLabels(trendTimeUnit, shape.length);
-  const businessFactor = { all: 1, outdoor: .52, sports: .31, kids: .17 }[document.querySelector('#business-unit').value];
+  let points;
+  if (trendTimeUnit === 'daily') {
+    points = rows.slice(-31);
+  } else {
+    const weeks = new Map();
+    rows.forEach(row => {
+      const date = new Date(`${row.date}T00:00:00`);
+      const monday = addDays(date, -(date.getDay() === 0 ? 6 : date.getDay() - 1));
+      const key = toInputDate(monday);
+      if (!weeks.has(key)) weeks.set(key, { date: key, impressions: 0, clicks: 0, views: 0, cost: 0, conversions: 0, revenue: 0 });
+      const week = weeks.get(key);
+      sumKeys.forEach(metric => { week[metric] += row[metric]; });
+    });
+    points = [...weeks.values()].slice(-13).map(calculateDerived);
+  }
+  const labels = points.map(point => {
+    const date = new Date(`${point.date}T00:00:00`);
+    const short = value => `${value.getMonth() + 1}/${value.getDate()}`;
+    return trendTimeUnit === 'daily' ? short(date) : `${short(date)}–${short(addDays(date, 6))}`;
+  });
   const width = 780, height = 250, left = 34, right = 24, top = 18, bottom = 34;
-  const step = shape.length > 1 ? (width - left - right) / (shape.length - 1) : 0;
-  const plotStartX = shape.length > 1 ? left : (left + width - right) / 2;
+  const step = points.length > 1 ? (width - left - right) / (points.length - 1) : 0;
+  const plotStartX = points.length > 1 ? left : (left + width - right) / 2;
   const series = selectedTrendMetrics.map((key, seriesIndex) => {
     const definition = campaignKpiDefinitions.find(item => item.key === key);
-    const total = totals[key] * businessFactor;
-    const values = shape.map((ratio, index) => total / pointCount * ratio * (1 + seriesIndex * .035 * (index % 2 ? 1 : -1)));
+    const values = points.map(point => point[key]);
     const max = Math.max(...values) * 1.08 || 1;
     return { ...definition, values, max, color: trendColors[seriesIndex] };
   });
@@ -284,10 +340,10 @@ function renderCampaignTrend(rows, totals) {
   });
   document.querySelector('#trend-series-legend').innerHTML = series.map(item => `<span style="--series-color:${item.color}"><i></i><b>${item.label}</b></span>`).join('');
   const ariaValue = (item, index) => `${item.label} ${formatTrendValue(item.key, item.values[index])}`;
-  const hitWidth = shape.length > 1 ? step : width - left - right;
+  const hitWidth = points.length > 1 ? step : width - left - right;
   const labelInterval = Math.max(1, Math.ceil(labels.length / 7));
   const axisLabels = labels.map((label, index) => index % labelInterval === 0 || index === labels.length - 1 ? `<text class="daily-label" x="${plotStartX+index*step}" y="${height-7}" text-anchor="middle">${label}</text>` : '').join('');
-  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${series.map(item => item.label).join(', ')} 추이">${[0,1,2,3,4].map(i => `<line class="daily-grid" x1="${left}" y1="${top+i*(height-top-bottom)/4}" x2="${width-right}" y2="${top+i*(height-top-bottom)/4}"/>`).join('')}<line class="campaign-hover-line" x1="0" y1="${top}" x2="0" y2="${height-bottom}"/>${series.map(item => `<path class="campaign-series-line" style="--series-color:${item.color}" d="${item.path}"/>${item.values.map((value,index) => `<circle class="campaign-series-point" style="--series-color:${item.color}" cx="${plotStartX+index*step}" cy="${top+(height-top-bottom)*(1-item.displayRatios[index])}" r="3"/>`).join('')}`).join('')}${axisLabels}${labels.map((label,index) => `<rect class="campaign-chart-hit" x="${shape.length === 1 ? left : Math.max(0, plotStartX+index*step-step/2)}" y="${top}" width="${shape.length === 1 ? hitWidth : index === 0 || index === labels.length-1 ? step/2+18 : step}" height="${height-top-bottom}" tabindex="0" data-index="${index}" aria-label="${label}, ${series.map(item => ariaValue(item,index)).join(', ')}"/>`).join('')}</svg><div class="campaign-chart-tooltip" role="status"></div>`;
+  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${series.map(item => item.label).join(', ')} 추이">${[0,1,2,3,4].map(i => `<line class="daily-grid" x1="${left}" y1="${top+i*(height-top-bottom)/4}" x2="${width-right}" y2="${top+i*(height-top-bottom)/4}"/>`).join('')}<line class="campaign-hover-line" x1="0" y1="${top}" x2="0" y2="${height-bottom}"/>${series.map(item => `<path class="campaign-series-line" style="--series-color:${item.color}" d="${item.path}"/>${item.values.map((value,index) => `<circle class="campaign-series-point" style="--series-color:${item.color}" cx="${plotStartX+index*step}" cy="${top+(height-top-bottom)*(1-item.displayRatios[index])}" r="3"/>`).join('')}`).join('')}${axisLabels}${labels.map((label,index) => `<rect class="campaign-chart-hit" x="${points.length === 1 ? left : Math.max(0, plotStartX+index*step-step/2)}" y="${top}" width="${points.length === 1 ? hitWidth : index === 0 || index === labels.length-1 ? step/2+18 : step}" height="${height-top-bottom}" tabindex="0" data-index="${index}" aria-label="${label}, ${series.map(item => ariaValue(item,index)).join(', ')}"/>`).join('')}</svg><div class="campaign-chart-tooltip" role="status"></div>`;
   bindCampaignTrendTooltip(series, labels, { width, left: plotStartX, step });
 }
 
@@ -360,9 +416,21 @@ function showReportView(hash = window.location.hash) {
   document.querySelector('#campaign-report').hidden = !campaignMode;
   const pageHeader = document.querySelector('.page-header');
   pageHeader.querySelector(':scope > div:first-child').hidden = campaignMode;
+  document.querySelector('#campaign-global-filter').hidden = !campaignMode;
   pageHeader.classList.toggle('campaign-period-header', campaignMode);
   document.querySelectorAll('.sidebar nav a').forEach(link => link.classList.toggle('active', campaignMode ? link.hash === '#campaign-report' : link.hash === (hash || '#overview')));
-  if (campaignMode) renderCampaignReport();
+  if (campaignMode) {
+    renderCampaignReport();
+    window.requestAnimationFrame(updateCampaignStickyOffsets);
+  }
+}
+
+function updateCampaignStickyOffsets() {
+  const header = document.querySelector('.page-header.campaign-period-header');
+  const tabs = document.querySelector('#campaign-report > .report-tabs');
+  if (!header || !tabs) return;
+  document.documentElement.style.setProperty('--campaign-header-height', `${header.offsetHeight}px`);
+  document.documentElement.style.setProperty('--campaign-tabs-height', `${tabs.offsetHeight}px`);
 }
 
 function showCampaignTab(tab) {
@@ -377,11 +445,41 @@ function showCampaignTab(tab) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   });
+  const selectedCampaign = document.querySelector('#campaign-select').value;
+  document.querySelectorAll('.campaign-tab-panel').forEach(panel => {
+    panel.dataset.campaign = selectedCampaign;
+  });
   if (!summary && !media) {
     document.querySelector('#campaign-tab-index').textContent = labels[tab][0];
     document.querySelector('#campaign-tab-title').textContent = labels[tab][1];
   }
   if (media) applyMediaProgressColors();
+}
+
+async function loadCampaignOptions() {
+  const select = document.querySelector('#campaign-select');
+  try {
+    const response = await fetch('/api/campaigns', { headers: { Accept: 'application/json' } });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '캠페인 목록을 불러오지 못했습니다.');
+    select.innerHTML = [
+      '<option value="all">전체 캠페인</option>',
+      ...result.campaigns.map(campaign => {
+        const option = document.createElement('option');
+        option.value = campaign;
+        option.textContent = campaign;
+        return option.outerHTML;
+      }),
+    ].join('');
+    select.disabled = false;
+    campaignMediaOptions = result.mediaAdTypes ?? [];
+    selectedCampaignMedia = new Set(campaignMediaOptions);
+    updateCampaignDrilldown('campaign');
+  } catch (error) {
+    select.innerHTML = '<option value="all">캠페인 조회 실패</option>';
+    select.disabled = true;
+    select.title = error.message;
+  }
 }
 
 function applyMediaProgressColors() {
@@ -504,7 +602,11 @@ document.querySelectorAll('.media-filter button').forEach(button => button.addEv
   render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
 }));
 document.querySelectorAll('.sidebar nav a').forEach(link => link.addEventListener('click', () => window.setTimeout(() => showReportView(link.hash), 0)));
-document.querySelector('#campaign-select').addEventListener('change', () => updateCampaignDrilldown('campaign'));
+document.querySelector('#campaign-select').addEventListener('change', () => {
+  updateCampaignDrilldown('campaign');
+  const activeTab = document.querySelector('[data-report-tab].active')?.dataset.reportTab || 'summary';
+  showCampaignTab(activeTab);
+});
 document.querySelector('#campaign-business').addEventListener('change', () => updateCampaignDrilldown('business'));
 document.querySelector('#campaign-media-trigger').addEventListener('click', () => {
   const options = document.querySelector('#campaign-media-options');
@@ -532,10 +634,11 @@ document.querySelectorAll('[data-time-unit]').forEach(button => button.addEventL
   document.querySelectorAll('[data-time-unit]').forEach(item => item.classList.toggle('active', item === button));
   renderCampaignReport();
 }));
-document.querySelector('#business-unit').addEventListener('change', renderCampaignReport);
 window.addEventListener('hashchange', () => showReportView());
+window.addEventListener('resize', updateCampaignStickyOffsets);
 
 setDateRange('yesterday');
 applyPeriod();
 updateCampaignDrilldown();
 showReportView();
+loadCampaignOptions();
