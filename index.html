@@ -35,6 +35,11 @@
             <p class="eyebrow">PERFORMANCE OVERVIEW <span>·</span> BLACKYAK</p>
             <h1>SUMMARY</h1>
           </div>
+          <div class="page-header-controls">
+          <label id="campaign-global-filter" class="campaign-primary-filter campaign-global-filter" hidden>
+            <span>캠페인</span>
+            <select id="campaign-select" disabled><option value="all">캠페인 불러오는 중…</option></select>
+          </label>
           <div class="period-control">
             <span class="period-label">조회 기간</span>
             <button id="period-trigger" class="period-trigger" type="button" aria-expanded="false" aria-controls="period-picker">
@@ -59,6 +64,7 @@
               </div>
               <div class="period-actions"><button id="period-cancel" type="button">취소</button><button id="period-apply" type="button">적용</button></div>
             </div>
+          </div>
           </div>
         </header>
 
@@ -96,12 +102,11 @@
               <p class="section-number">CAMPAIGN REPORT</p>
               <div class="campaign-title-row">
                 <h2 id="campaign-report-title">캠페인 성과 리포트</h2>
-                <label class="campaign-primary-filter"><span>캠페인</span><select id="campaign-select"><option value="all">전체 캠페인</option><option value="summit">SUMMIT 2026</option><option value="trail">TRAIL RUNNING</option><option value="season">SEASON OFF</option></select></label>
               </div>
               <p class="panel-subtitle">캠페인별 핵심 성과를 비교하고 흐름을 확인하세요. · 목업 데이터</p>
             </div>
             <div class="campaign-filters" aria-label="캠페인 리포트 필터">
-              <label>사업부<select id="campaign-business"><option value="all">전체 사업부</option></select></label>
+              <label>사업부<select id="campaign-business"><option value="all">전체 사업부</option><option value="MKT">MKT</option><option value="PERF">PERF</option></select></label>
               <div class="campaign-media-control">
                 <span>매체</span>
                 <button id="campaign-media-trigger" type="button" aria-expanded="false" aria-controls="campaign-media-options"><strong id="campaign-media-summary">전체 매체</strong><i></i></button>
@@ -116,13 +121,11 @@
                 <div><p class="section-number">PERFORMANCE TREND</p><h2>성과 추이</h2><p class="panel-subtitle">상단 지표 카드를 최대 3개까지 선택할 수 있습니다.</p></div>
                 <div class="trend-controls">
                   <div class="time-toggle" aria-label="시간 기준"><button class="active" type="button" data-time-unit="daily">일자별</button><button type="button" data-time-unit="weekly" title="월요일부터 일요일까지를 한 주로 집계">주차별</button></div>
-                  <label>사업부<select id="business-unit"><option value="all">전체 사업부</option><option value="outdoor">아웃도어</option><option value="sports">스포츠</option><option value="kids">키즈</option></select></label>
                 </div>
               </div>
               <div id="trend-series-legend" class="trend-series-legend" aria-label="선택 지표와 축 범위"></div>
               <div id="campaign-trend-chart" class="campaign-trend-chart" aria-label="선택한 캠페인 지표 추이"></div>
             </article>
-            <article class="panel campaign-status-panel"><div><p class="section-number">CAMPAIGN STATUS</p><h2>운영 현황</h2></div><div id="campaign-status" class="campaign-status"></div></article>
           </div>
           <article class="panel campaign-table-panel weekly-ga-panel">
             <div class="panel-heading"><div><p class="section-number">WEEKLY GA PERFORMANCE</p><h2>주차별 GA 성과</h2><p class="panel-subtitle">월요일–일요일 기준 · 각 지표 하단은 직전 주차 대비 증감률</p></div><span class="updated-at">단위 · 명, 건, 원, %</span></div>
