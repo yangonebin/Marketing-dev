@@ -225,7 +225,22 @@ td { padding: 12px 8px; }
 .media-detail-table thead tr:nth-child(2) th:nth-child(n+6):nth-child(-n+14), .media-detail-table tbody td:nth-child(n+6):nth-child(-n+14) { background: rgba(72,217,255,.025); }
 .media-detail-table thead tr:nth-child(2) th:nth-child(n+15), .media-detail-table tbody td:nth-child(n+15) { background: rgba(169,158,255,.035); }
 .media-detail-table thead tr:nth-child(2) th:nth-child(6), .media-detail-table tbody td:nth-child(6), .media-detail-table thead tr:nth-child(2) th:nth-child(15), .media-detail-table tbody td:nth-child(15) { border-left: 2px solid rgba(158,174,255,.2); }
-.media-detail-table .media-result-row td { padding-top: 15px; padding-bottom: 12px; color: #dce3f0; font-size: 10px; }.media-detail-table .media-result-row td:first-child { color: #fff; font-weight: 800; }
+.media-detail-table .media-result-row td { padding-top: 8px; padding-bottom: 7px; color: #dce3f0; font-size: 10px; }.media-detail-table .media-result-row td:first-child { color: #fff; font-weight: 800; }
+.media-detail-table .media-result-row.attribute-group-start td { border-top: 2px solid rgba(134,151,190,.34); }
+.media-detail-table .media-result-row[data-business="MKT"] td:first-child { box-shadow: inset 3px 0 #48d9ff; }
+.media-detail-table .media-result-row[data-business="PERF"] td:first-child { box-shadow: inset 3px 0 #a99eff; }
+.media-detail-table .media-result-row.media-inactive-row { opacity: .42; }
+.media-detail-table .media-total-row td { border-top: 2px solid rgba(208,220,245,.38); border-bottom: 2px solid rgba(158,174,255,.28); background: rgba(119,135,175,.1) !important; }
+.media-detail-table .media-total-row + .media-total-row td { border-top-width: 0; }
+.media-attribute-badge.kpi-total { color: #f0f3fb; border-color: rgba(210,220,245,.22); background: rgba(210,220,245,.1); }
+.media-value-with-gap { min-height: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; white-space: nowrap; }
+.media-value-with-gap > strong { color: #dce3f0; font-size: 10px; }
+.media-inline-gap { display: inline-flex; padding: 2px 5px; border-radius: 999px; font-size: 7px; line-height: 1; font-weight: 800; }
+.media-inline-gap.progress-high { color: #67d9b9; background: rgba(70,190,155,.1); }.media-inline-gap.progress-low { color: #ef8997; background: rgba(229,93,111,.1); }.media-inline-gap.progress-neutral { color: #8792a7; background: rgba(127,137,159,.08); }
+.media-attribute-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 48px; padding: 4px 7px; border: 1px solid transparent; border-radius: 999px; font-size: 9px; font-weight: 800; }
+.media-attribute-badge.business-mkt { color: #67ddfa; border-color: rgba(72,217,255,.25); background: rgba(72,217,255,.09); }
+.media-attribute-badge.business-perf { color: #bbb1ff; border-color: rgba(169,158,255,.28); background: rgba(169,158,255,.1); }
+.media-attribute-badge.kpi-reach { color: #78e4ff; background: rgba(72,217,255,.08); }.media-attribute-badge.kpi-view { color: #c2baff; background: rgba(169,158,255,.09); }.media-attribute-badge.kpi-traffic { color: #ff9caf; background: rgba(255,140,162,.09); }.media-attribute-badge.kpi-conversion { color: #75dfc1; background: rgba(98,226,194,.09); }
 .media-progress-row td { padding: 7px 8px; border-bottom-color: rgba(158,174,255,.18); color: #8792a7; font-size: 8px; font-weight: 700; }.media-progress-row td:first-child { text-align: right; color: #929db2; }.media-progress-row td:first-child strong { margin-right: 7px; color: #cbd4e5; }.media-progress-row td:first-child span { color: #6f7b91; font-size: 7px; }
 .media-progress-row td.progress-high { color: #67d9b9; background: rgba(70,190,155,.055); }.media-progress-row td.progress-low { color: #ef8997; background: rgba(229,93,111,.055); }.media-progress-row td.progress-neutral { color: #8792a7; }
 .media-card-name { display: flex; align-items: center; gap: 7px; color: #cbd3e2; font-size: 10px; font-weight: 700; }.media-card-name i, .media-mini-legend i { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 7px currentColor; }
@@ -306,14 +321,17 @@ td { padding: 12px 8px; }
 .campaign-status dl { margin: 0; }.campaign-status dl > div { display: flex; justify-content: space-between; gap: 18px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 10px; }.campaign-status dt { color: #8791a8; }.campaign-status dd { margin: 0; font-weight: 700; }
 .campaign-table-panel td:first-child strong { color: #fff; }.campaign-state { display: inline-flex; padding: 4px 8px; border-radius: 999px; color: #70e7c1; background: rgba(98,226,194,.1); font-size: 9px; }.campaign-state.ended { color: #8d96aa; background: rgba(141,150,170,.1); }.campaign-empty { padding: 32px; color: #7f899e; text-align: center !important; }
 .weekly-ga-panel .panel-subtitle { margin-top: 7px; }
+.weekly-ga-heading-actions { display: flex; align-items: center; gap: 14px; }
 .weekly-ga-table { min-width: 1390px; table-layout: fixed; }
 .weekly-ga-table th { min-width: 105px; padding: 12px 9px; vertical-align: bottom; text-align: center; font-size: 11px; white-space: nowrap; }
-.weekly-ga-table th:first-child { width: 125px; text-align: left; }.weekly-ga-table th:nth-child(3) { width: 130px; }.weekly-ga-table th:nth-child(12) { width: 150px; }
+.weekly-ga-table .week-column { width: 125px; text-align: left; }.weekly-ga-table .business-column { width: 76px; text-align: left; }
+.weekly-ga-table td.week-column[rowspan] { vertical-align: middle; border-right: 1px solid rgba(90,105,134,.18); }
 .weekly-ga-table th small { display: block; margin-top: 5px; color: #707b91; font-size: 9px; font-weight: 500; }
-.weekly-ga-table td { padding: 16px 9px; text-align: center; vertical-align: middle; }
-.weekly-ga-table td:first-child { text-align: left; }.weekly-ga-table td > strong { display: block; color: #e8edf7; font: 700 12px Archivo, "Noto Sans KR", sans-serif; }
-.weekly-ga-table .week-basis { display: block; margin-top: 6px; color: #8792a7; font-size: 10px; font-weight: 600; }
-.ga-delta { display: inline-flex; margin-top: 7px; padding: 4px 7px; border-radius: 999px; font-size: 9px; font-weight: 700; }
+.weekly-ga-table td { padding: 11px 9px; text-align: center; vertical-align: middle; }
+.weekly-ga-table td > strong, .weekly-ga-table .ga-cell > strong { color: #e8edf7; font: 700 12px Archivo, "Noto Sans KR", sans-serif; }
+.weekly-ga-table .week-basis { display: block; margin-top: 4px; color: #8792a7; font-size: 10px; font-weight: 600; }
+.weekly-ga-table .ga-cell { display: flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
+.ga-delta { display: inline-flex; padding: 3px 5px; border-radius: 999px; font-size: 8px; font-weight: 700; }
 .ga-delta.up { color: #65d8b8; background: rgba(70,190,155,.1); }.ga-delta.down { color: #ef8997; background: rgba(229,93,111,.1); }.ga-delta.neutral { color: #737e93; background: rgba(115,126,147,.08); }
 
 @media (max-width: 760px) {

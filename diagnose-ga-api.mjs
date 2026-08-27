@@ -1,0 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { sign } from 'node:crypto';
+const credentials = JSON.parse(readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS || 'C:\\Users\\USER\\MarketingDev\\secrets\\sa-blackyak-61217_bigquery_key.json', 'utf8'));
+const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+const now = Math.floor(Date.now() / 1000);
+const unsigned = `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode({ iss: credentials.client_email, scope: 'https://www.googleapis.com/auth/analytics.readonly', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 })}`;
+const signature = sign('RSA-SHA256', Buffer.from(unsigned), credentials.private_key).toString('base64url');
+const tokenResponse = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${signature}` }) });
+const token = await tokenResponse.json();
+if (!tokenResponse.ok) throw new Error(`OAuth failed (${tokenResponse.status})`);
+const response = await fetch('https://analyticsdata.googleapis.com/v1beta/properties/496808362:runReport', { method: 'POST', headers: { Authorization: `Bearer ${token.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ dateRanges: [{ startDate: '2026-07-27', endDate: '2026-08-24' }], dimensions: [{ name: 'sessionCampaignName' }], metrics: [{ name: 'eventCount' }, { name: 'totalRevenue' }], dimensionFilter: { andGroup: { expressions: [{ filter: { fieldName: 'sessionCampaignName', stringFilter: { matchType: 'CONTAINS', value: 'Stonemaster', caseSensitive: true } } }, { filter: { fieldName: 'sessionCampaignName', stringFilter: { matchType: 'CONTAINS', value: 'MKT', caseSensitive: true } } }, { filter: { fieldName: 'eventName', stringFilter: { matchType: 'EXACT', value: 'purchase', caseSensitive: true } } }] } } }) });
+const result = await response.json();
+if (!response.ok) throw new Error(`GA Data API failed (${response.status}): ${result.error?.message ?? ''}`);
+console.log(JSON.stringify(result.rows ?? [], null, 2));
