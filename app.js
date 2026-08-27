@@ -1,4 +1,5 @@
 import { calculateMetrics } from './metrics.js';
+import { getAvailableBusinesses, getAvailableMedia } from './campaign-filters.js';
 
 const datasets = {
   30: [
@@ -40,8 +41,13 @@ const trendColors = ['#48d9ff', '#ff8ca2', '#a99eff'];
 let selectedTrendMetrics = ['cost', 'revenue'];
 let trendTimeUnit = 'daily';
 let campaignMediaOptions = [];
+let legacyCampaignMediaOptions = [];
+let campaignFilterRows = [];
 let selectedCampaignMedia = new Set();
 let campaignMetricRequestId = 0;
+let campaignMediaTableRequestId = 0;
+let weeklyGaViewMode = 'combined';
+let latestWeeklyGaRows = [];
 
 function makeTrendChart(period) {
   const { labels, revenue, cost } = trends[period];
@@ -203,7 +209,8 @@ async function loadCampaignMediaMetrics() {
       card.querySelector('.kpi-progress').innerHTML = `<small class="actual-data">BigQuery · ${result.startDate}–${result.endDate}</small>`;
     });
     renderCampaignTrend(result.trend);
-    renderWeeklyGaTable(result.weeklyGa);
+    latestWeeklyGaRows = result.weeklyGa;
+    renderWeeklyGaTable(latestWeeklyGaRows);
   } catch (error) {
     if (requestId !== campaignMetricRequestId) return;
     mediaKeys.forEach(key => {
@@ -218,10 +225,186 @@ async function loadCampaignMediaMetrics() {
   }
 }
 
+async function loadCampaignMediaTable() {
+  const tableBody = document.querySelector('#campaign-media-detail-body');
+  const campaign = document.querySelector('#campaign-select').value;
+  const requestId = ++campaignMediaTableRequestId;
+  tableBody.innerHTML = '<tr><td colspan="19" class="empty-state">매체 데이터를 불러오는 중…</td></tr>';
+  try {
+    const today = new Date();
+    const yesterday = addDays(today, -1);
+    const operationDates = campaignFilterRows
+      .filter(row => campaign === 'all' || row.campaign === campaign)
+      .map(row => String(row.operationStart ?? '').match(/(\d{1,2})월\s*(\d{1,2})일/))
+      .filter(Boolean)
+      .map(match => new Date(today.getFullYear(), Number(match[1]) - 1, Number(match[2])));
+    const cumulativeStart = operationDates.length ? new Date(Math.min(...operationDates)) : new Date(today.getFullYear(), 0, 1);
+    const params = new URLSearchParams({ campaign, start: toInputDate(cumulativeStart), end: toInputDate(yesterday) });
+    const response = await fetch(`/api/campaign-media-table?${params}`, { headers: { Accept: 'application/json' } });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '매체 데이터를 불러오지 못했습니다.');
+    if (requestId !== campaignMediaTableRequestId) return;
+    renderBusinessProgress(result.businessProgress ?? [], result.rows);
+    renderGoalKpiGaps(result.rows);
+    if (!result.rows.length) {
+      tableBody.innerHTML = '<tr><td colspan="19" class="empty-state">선택한 캠페인의 미디어믹스 데이터가 없습니다.</td></tr>';
+      return;
+    }
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+    const integer = value => number.format(Math.round(value));
+    const percent = (value, digits = 2) => `${Number(value).toFixed(digits)}%`;
+    const operationDate = value => {
+      const match = String(value ?? '').match(/(\d{1,2})월\s*(\d{1,2})일/);
+      return match ? `${Number(match[1])}/${Number(match[2])}` : String(value || '-');
+    };
+    const kpiClasses = { '도달': 'reach', '조회': 'view', '트래픽': 'traffic', '전환': 'conversion' };
+    const achievementGap = (actual, target) => {
+      if (!target) return '';
+      const rate = actual / target * 100;
+      const state = rate >= 100 ? 'progress-high' : 'progress-low';
+      return `<small class="media-inline-gap ${state}">${rate.toFixed(0)}%</small>`;
+    };
+    const differenceGap = (key, actual, target) => {
+      if (!target) return '';
+      const gap = actual - target;
+      const lowerIsBetter = ['cpm', 'cpc', 'cpv', 'cpo'].includes(key);
+      const positive = lowerIsBetter ? gap <= 0 : gap >= 0;
+      const state = Math.abs(gap) < .005 ? 'progress-neutral' : positive ? 'progress-high' : 'progress-low';
+      const sign = gap > 0 ? '+' : gap < 0 ? '−' : '';
+      const formatted = ['ctr', 'vtr', 'cvr', 'roas'].includes(key)
+        ? `${sign}${Math.abs(gap).toFixed(key === 'roas' ? 1 : 2)}%p`
+        : `${sign}${integer(Math.abs(gap))}`;
+      return `<small class="media-inline-gap ${state}">${formatted}</small>`;
+    };
+    const metricCell = (value, gap = '') => `<td><div class="media-value-with-gap"><strong>${value}</strong>${gap}</div></td>`;
+    const calculateRowMetrics = values => ({
+      ...values,
+      cpm: values.impressions ? values.cost / values.impressions * 1000 : 0,
+      cpc: values.clicks ? values.cost / values.clicks : 0,
+      cpv: values.views ? values.cost / values.views : 0,
+      ctr: values.impressions ? values.clicks / values.impressions * 100 : 0,
+      vtr: values.impressions ? values.views / values.impressions * 100 : 0,
+      cpo: values.purchases ? values.cost / values.purchases : 0,
+      cvr: values.clicks ? values.purchases / values.clicks * 100 : 0,
+      roas: values.cost ? values.revenue / values.cost * 100 : 0,
+    });
+    const aggregateBusiness = business => {
+      const businessRows = result.rows.filter(row => row.business === business);
+      const sum = source => businessRows.reduce((total, row) => {
+        ['cost', 'impressions', 'clicks', 'views', 'purchases', 'revenue'].forEach(key => { total[key] += source(row)[key]; });
+        return total;
+      }, { cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+      const dateValue = value => {
+        const match = String(value ?? '').match(/(\d{1,2})월\s*(\d{1,2})일/);
+        return match ? Number(match[1]) * 100 + Number(match[2]) : 9999;
+      };
+      const starts = businessRows.map(row => row.operationStart).sort((a, b) => dateValue(a) - dateValue(b));
+      const ends = businessRows.map(row => row.operationEnd).sort((a, b) => dateValue(b) - dateValue(a));
+      const actual = sum(row => row);
+      const serverTotal = result.businessProgress?.find(item => item.business === business);
+      if (serverTotal) {
+        actual.purchases = serverTotal.actual.purchases;
+        actual.revenue = serverTotal.actual.revenue;
+      }
+      return { business, operationStart: starts[0] ?? '', operationEnd: ends[0] ?? '', ...calculateRowMetrics(actual), target: calculateRowMetrics(sum(row => row.target)) };
+    };
+    const renderTotalRow = row => {
+      const inactive = row.impressions === 0;
+      const gap = (builder, ...args) => inactive ? '' : builder(...args);
+      const period = `${operationDate(row.operationStart)}–${operationDate(row.operationEnd)}`;
+      return `<tr class="media-result-row media-total-row ${inactive ? 'media-inactive-row' : ''}" data-business="${row.business}" data-kpi="TTL"><td><span class="media-attribute-badge business-${row.business.toLowerCase()}">${row.business}</span></td><td><span class="media-attribute-badge kpi-total">TTL</span></td><td>전체</td><td><strong>전체 매체</strong></td><td>${period}</td>${metricCell(integer(row.cost), gap(achievementGap, row.cost, row.target.cost))}${metricCell(integer(row.impressions), gap(achievementGap, row.impressions, row.target.impressions))}${metricCell(integer(row.clicks), gap(achievementGap, row.clicks, row.target.clicks))}${metricCell(integer(row.views), gap(achievementGap, row.views, row.target.views))}${metricCell(integer(row.cpm), gap(differenceGap, 'cpm', row.cpm, row.target.cpm))}${metricCell(integer(row.cpc), gap(differenceGap, 'cpc', row.cpc, row.target.cpc))}${metricCell(integer(row.cpv), gap(differenceGap, 'cpv', row.cpv, row.target.cpv))}${metricCell(percent(row.ctr), gap(differenceGap, 'ctr', row.ctr, row.target.ctr))}${metricCell(percent(row.vtr), gap(differenceGap, 'vtr', row.vtr, row.target.vtr))}${metricCell(integer(row.purchases), gap(achievementGap, row.purchases, row.target.purchases))}${metricCell(integer(row.revenue), gap(achievementGap, row.revenue, row.target.revenue))}${metricCell(integer(row.cpo), gap(differenceGap, 'cpo', row.cpo, row.target.cpo))}${metricCell(percent(row.cvr), gap(differenceGap, 'cvr', row.cvr, row.target.cvr))}${metricCell(percent(row.roas, 1), gap(differenceGap, 'roas', row.roas, row.target.roas))}</tr>`;
+    };
+    const totalRows = ['MKT', 'PERF'].map(aggregateBusiness).map(renderTotalRow).join('');
+    const detailRows = result.rows.map((row, index) => {
+      const previous = result.rows[index - 1];
+      const groupStart = !previous || previous.business !== row.business || previous.kpi !== row.kpi;
+      const inactive = row.impressions === 0;
+      const period = `${operationDate(row.operationStart)}–${operationDate(row.operationEnd)}`;
+      const gap = (builder, ...args) => inactive ? '' : builder(...args);
+      return `<tr class="media-result-row ${groupStart ? 'attribute-group-start' : ''} ${inactive ? 'media-inactive-row' : ''}" data-business="${escapeHtml(row.business)}" data-kpi="${escapeHtml(row.kpi)}"><td><span class="media-attribute-badge business-${row.business.toLowerCase()}">${escapeHtml(row.business)}</span></td><td><span class="media-attribute-badge kpi-${kpiClasses[row.kpi] ?? 'other'}">${escapeHtml(row.kpi || '-')}</span></td><td>${escapeHtml(row.platform)}</td><td><strong>${escapeHtml(row.media)}</strong></td><td>${escapeHtml(period)}</td>${metricCell(integer(row.cost), gap(achievementGap, row.cost, row.target.cost))}${metricCell(integer(row.impressions), gap(achievementGap, row.impressions, row.target.impressions))}${metricCell(integer(row.clicks), gap(achievementGap, row.clicks, row.target.clicks))}${metricCell(integer(row.views), gap(achievementGap, row.views, row.target.views))}${metricCell(integer(row.cpm), gap(differenceGap, 'cpm', row.cpm, row.target.cpm))}${metricCell(integer(row.cpc), gap(differenceGap, 'cpc', row.cpc, row.target.cpc))}${metricCell(integer(row.cpv), gap(differenceGap, 'cpv', row.cpv, row.target.cpv))}${metricCell(percent(row.ctr), gap(differenceGap, 'ctr', row.ctr, row.target.ctr))}${metricCell(percent(row.vtr), gap(differenceGap, 'vtr', row.vtr, row.target.vtr))}${metricCell(integer(row.purchases), gap(achievementGap, row.purchases, row.target.purchases))}${metricCell(integer(row.revenue), gap(achievementGap, row.revenue, row.target.revenue))}${metricCell(integer(row.cpo), gap(differenceGap, 'cpo', row.cpo, row.target.cpo))}${metricCell(percent(row.cvr), gap(differenceGap, 'cvr', row.cvr, row.target.cvr))}${metricCell(percent(row.roas, 1), gap(differenceGap, 'roas', row.roas, row.target.roas))}</tr>`;
+    }).join('');
+    tableBody.innerHTML = totalRows + detailRows;
+  } catch (error) {
+    if (requestId !== campaignMediaTableRequestId) return;
+    tableBody.innerHTML = `<tr><td colspan="19" class="empty-state">${error.message}</td></tr>`;
+  }
+}
+
+function renderBusinessProgress(progress = [], rows = []) {
+  const container = document.querySelector('#business-progress-cards');
+  const fallback = ['MKT', 'PERF'].map(business => {
+    const businessRows = rows.filter(row => row.business === business);
+    const actual = businessRows.reduce((sum, row) => ({ cost: sum.cost + row.cost, impressions: sum.impressions + row.impressions, clicks: sum.clicks + row.clicks, views: sum.views + row.views, revenue: sum.revenue + row.revenue }), { cost: 0, impressions: 0, clicks: 0, views: 0, revenue: 0 });
+    const target = businessRows.reduce((sum, row) => ({ cost: sum.cost + row.target.cost, impressions: sum.impressions + row.target.impressions, clicks: sum.clicks + row.target.clicks, views: sum.views + row.target.views, revenue: sum.revenue + row.target.revenue }), { cost: 0, impressions: 0, clicks: 0, views: 0, revenue: 0 });
+    return { business, dateProgress: null, actual, target, rates: Object.fromEntries(Object.keys(actual).map(key => [key, target[key] ? actual[key] / target[key] * 100 : 0])) };
+  });
+  const values = progress.length ? progress : fallback;
+  const definitions = [
+    ['cost', '광고비'], ['impressions', '노출'], ['clicks', '클릭'], ['views', '조회'], ['revenue', '총수익'],
+  ];
+  const formatValue = value => number.format(Math.round(value));
+  container.innerHTML = values.map(item => {
+    const dateLabel = item.dateProgress === null ? '재시작 후 계산' : `${Math.round(item.dateProgress)}%`;
+    const color = item.business === 'MKT' ? '#48d9ff' : '#ff8ca2';
+    const metrics = definitions.map(([key, label]) => {
+      const rate = item.rates[key] ?? 0;
+      const width = Math.min(100, Math.max(0, rate));
+      return `<div title="실적 ${formatValue(item.actual[key])} / 목표 ${formatValue(item.target[key])}"><span>${label} <b>${rate.toFixed(0)}%</b></span><i><em style="--progress:${width}%"></em></i></div>`;
+    }).join('');
+    return `<article class="business-progress-card"><div class="business-card-head"><span><i style="background:${color}"></i>${item.business}</span><strong>날짜 진척률 ${dateLabel}</strong></div><div class="business-metrics"><div class="date-progress-metric"><span>날짜 진척률 <b>${dateLabel}</b></span><i><em style="--progress:${item.dateProgress === null ? 0 : item.dateProgress}%"></em></i></div>${metrics}</div></article>`;
+  }).join('');
+}
+
+function renderGoalKpiGaps(rows = []) {
+  const container = document.querySelector('#goal-kpi-grid');
+  const definitions = [
+    { kpi: '도달', label: 'REACH', metric: 'cpm', metricLabel: 'CPM', color: '#48d9ff', unit: 'currency' },
+    { kpi: '조회', label: 'VIEW', metric: 'cpv', metricLabel: 'CPV', color: '#a99eff', unit: 'currency' },
+    { kpi: '트래픽', label: 'TRAFFIC', metric: 'ctr', metricLabel: 'CTR', color: '#ff8ca2', unit: 'percent' },
+    { kpi: '전환', label: 'CONVERSION', metric: 'roas', metricLabel: 'ROAS', color: '#62e2c2', unit: 'percent' },
+  ];
+  const aggregate = goalRows => goalRows.reduce((sum, row) => {
+    ['cost', 'impressions', 'clicks', 'views', 'revenue'].forEach(key => { sum.actual[key] += row[key]; sum.target[key] += row.target[key]; });
+    return sum;
+  }, { actual: { cost: 0, impressions: 0, clicks: 0, views: 0, revenue: 0 }, target: { cost: 0, impressions: 0, clicks: 0, views: 0, revenue: 0 } });
+  const metricValue = (metric, values) => ({
+    cpm: values.impressions ? values.cost / values.impressions * 1000 : 0,
+    cpv: values.views ? values.cost / values.views : 0,
+    ctr: values.impressions ? values.clicks / values.impressions * 100 : 0,
+    roas: values.cost ? values.revenue / values.cost * 100 : 0,
+  })[metric];
+  const format = (value, definition) => definition.unit === 'currency' ? `${number.format(Math.round(value))}원` : `${value.toFixed(definition.metric === 'roas' ? 1 : 2)}%`;
+  container.innerHTML = definitions.map(definition => {
+    const values = aggregate(rows.filter(row => row.kpi === definition.kpi));
+    const target = metricValue(definition.metric, values.target);
+    const actual = metricValue(definition.metric, values.actual);
+    const gap = actual - target;
+    const sign = gap > 0 ? '+' : gap < 0 ? '−' : '';
+    const gapValue = definition.unit === 'currency' ? `${sign}${number.format(Math.round(Math.abs(gap)))}원` : `${sign}${Math.abs(gap).toFixed(definition.metric === 'roas' ? 1 : 2)}%p`;
+    return `<article style="--goal-color:${definition.color}"><div class="goal-kpi-top"><span>${definition.label} · ${definition.metricLabel}</span></div><div class="goal-kpi-value"><strong>${gapValue}</strong></div><div class="goal-kpi-meta"><span>목표 <b>${format(target, definition)}</b></span><span>달성 <b>${format(actual, definition)}</b></span></div></article>`;
+  }).join('');
+}
+
 function updateCampaignDrilldown(level = 'campaign') {
   const businessSelect = document.querySelector('#campaign-business');
   const previousBusiness = businessSelect.value;
-  businessSelect.value = ['all', 'MKT', 'PERF'].includes(previousBusiness) ? previousBusiness : 'all';
+  const campaign = document.querySelector('#campaign-select').value;
+  if (level === 'campaign' && campaignFilterRows.length) {
+    const businesses = getAvailableBusinesses(campaignFilterRows, campaign);
+    businessSelect.innerHTML = businesses.map(business => {
+      const option = document.createElement('option');
+      option.value = business;
+      option.textContent = business;
+      return option.outerHTML;
+    }).join('');
+    businessSelect.value = businesses.includes(previousBusiness) ? previousBusiness : businesses[0] ?? '';
+    businessSelect.disabled = businesses.length === 0;
+  }
+  const business = businessSelect.value;
+  campaignMediaOptions = campaignFilterRows.length
+    ? getAvailableMedia(campaignFilterRows, campaign, business)
+    : legacyCampaignMediaOptions;
+  selectedCampaignMedia = new Set(campaignMediaOptions);
   renderCampaignMediaOptions(campaignMediaOptions);
   renderCampaignReport();
 }
@@ -247,8 +430,11 @@ function handleCampaignMediaChange(input) {
 
 function renderWeeklyGaTable(rows = []) {
   const tableBody = document.querySelector('#campaign-table-body');
+  const businessMode = weeklyGaViewMode === 'business';
+  document.querySelector('#weekly-business-header').hidden = !businessMode;
+  const columnCount = businessMode ? 13 : 12;
   if (!rows.length) {
-    tableBody.innerHTML = '<tr><td colspan="12" class="empty-state">선택한 조건의 GA 주차 데이터가 없습니다.</td></tr>';
+    tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="empty-state">선택한 조건의 GA 주차 데이터가 없습니다.</td></tr>`;
     return;
   }
   const delta = (current, previous, invert = false) => {
@@ -258,21 +444,22 @@ function renderWeeklyGaTable(rows = []) {
     return `<small class="ga-delta ${positive ? 'up' : 'down'}">${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(1)}%</small>`;
   };
   const duration = seconds => `${Math.floor(seconds / 60)}분 ${String(seconds % 60).padStart(2, '0')}초`;
-  const cell = (value, comparison, formatted = number.format(value), invert = false) => `<td><strong>${formatted}</strong>${delta(value, comparison, invert)}</td>`;
+  const cell = (value, comparison, formatted = number.format(value), invert = false) => `<td><div class="ga-cell"><strong>${formatted}</strong>${delta(value, comparison, invert)}</div></td>`;
+  const modeRows = rows.filter(row => (row.viewMode ?? 'combined') === weeklyGaViewMode
+    && (!businessMode || ['MKT', 'PERF'].includes(row.business)));
   const selectedStart = new Date(`${startDate.value}T00:00:00`);
   const selectedEnd = new Date(`${endDate.value}T00:00:00`);
-  const visibleRows = rows.filter(row => {
+  const visibleRows = modeRows.filter(row => {
     const monday = new Date(`${row.weekStart}T00:00:00`);
-    const sunday = addDays(monday, 6);
-    return monday <= selectedEnd && sunday >= selectedStart;
-  });
+    return monday <= selectedEnd && addDays(monday, 6) >= selectedStart;
+  }).slice(-13);
   if (!visibleRows.length) {
-    tableBody.innerHTML = '<tr><td colspan="12" class="empty-state">선택한 기간의 GA 주차 데이터가 없습니다.</td></tr>';
+    tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="empty-state">선택한 기간의 GA 주차 데이터가 없습니다.</td></tr>`;
     return;
   }
-  tableBody.innerHTML = visibleRows.map(row => {
-    const originalIndex = rows.indexOf(row);
-    const previous = rows[originalIndex - 1];
+  tableBody.innerHTML = visibleRows.map((row, rowIndex) => {
+    const originalIndex = modeRows.indexOf(row);
+    const previous = [...modeRows.slice(0, originalIndex)].reverse().find(item => !businessMode || item.business === row.business);
     const newUserShare = row.users ? row.newUsers / row.users * 100 : 0;
     const previousNewUserShare = previous?.users ? previous.newUsers / previous.users * 100 : undefined;
     const conversionRate = row.sessions ? row.purchases / row.sessions * 100 : 0;
@@ -281,9 +468,14 @@ function renderWeeklyGaTable(rows = []) {
     const previousCartRate = previous?.sessions ? previous.carts / previous.sessions * 100 : undefined;
     const monday = new Date(`${row.weekStart}T00:00:00`);
     const sunday = addDays(monday, 6);
+    const rangeStart = monday < selectedStart ? selectedStart : monday;
+    const rangeEnd = sunday > selectedEnd ? selectedEnd : sunday;
     const weekStart = `${String(monday.getFullYear()).slice(-2)}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')} 주차`;
-    const weekRange = `${monday.getMonth() + 1}/${monday.getDate()}–${sunday.getMonth() + 1}/${sunday.getDate()}`;
-    return `<tr><td><strong>${weekStart}</strong><small class="week-basis">${weekRange}</small></td>${cell(row.sessions, previous?.sessions)}${cell(row.duration, previous?.duration, duration(row.duration))}${cell(row.scrolls, previous?.scrolls)}${cell(row.users, previous?.users)}${cell(row.newUsers, previous?.newUsers)}${cell(newUserShare, previousNewUserShare, `${newUserShare.toFixed(1)}%`)}${cell(row.carts, previous?.carts)}${cell(row.purchases, previous?.purchases)}${cell(row.revenue, previous?.revenue)}${cell(conversionRate, previousConversionRate, `${conversionRate.toFixed(2)}%`)}${cell(cartRate, previousCartRate, `${cartRate.toFixed(2)}%`)}</tr>`;
+    const weekRange = `${rangeStart.getMonth() + 1}/${rangeStart.getDate()}–${rangeEnd.getMonth() + 1}/${rangeEnd.getDate()}`;
+    const showWeek = !businessMode || visibleRows[rowIndex - 1]?.weekStart !== row.weekStart;
+    const weekRowspan = businessMode ? visibleRows.filter(item => item.weekStart === row.weekStart).length : 1;
+    const weekCell = showWeek ? `<td class="week-column" rowspan="${weekRowspan}"><strong>${weekStart}</strong><small class="week-basis">${weekRange}</small></td>` : '';
+    return `<tr>${weekCell}${businessMode ? `<td class="business-column"><strong>${row.business}</strong></td>` : ''}${cell(row.sessions, previous?.sessions)}${cell(row.duration, previous?.duration, duration(row.duration))}${cell(row.scrolls, previous?.scrolls)}${cell(row.users, previous?.users)}${cell(row.newUsers, previous?.newUsers)}${cell(newUserShare, previousNewUserShare, `${newUserShare.toFixed(1)}%`)}${cell(row.carts, previous?.carts)}${cell(row.purchases, previous?.purchases)}${cell(row.revenue, previous?.revenue)}${cell(conversionRate, previousConversionRate, `${conversionRate.toFixed(2)}%`)}${cell(cartRate, previousCartRate, `${cartRate.toFixed(2)}%`)}</tr>`;
   }).join('');
 }
 
@@ -412,11 +604,13 @@ function toggleTrendMetric(key) {
 
 function showReportView(hash = window.location.hash) {
   const campaignMode = hash === '#campaign-report';
+  const mediaTabActive = document.querySelector('[data-report-tab="media"]')?.classList.contains('active');
   document.querySelector('#overview-view').hidden = campaignMode;
   document.querySelector('#campaign-report').hidden = !campaignMode;
   const pageHeader = document.querySelector('.page-header');
   pageHeader.querySelector(':scope > div:first-child').hidden = campaignMode;
   document.querySelector('#campaign-global-filter').hidden = !campaignMode;
+  document.querySelector('.period-control').hidden = campaignMode && mediaTabActive;
   pageHeader.classList.toggle('campaign-period-header', campaignMode);
   document.querySelectorAll('.sidebar nav a').forEach(link => link.classList.toggle('active', campaignMode ? link.hash === '#campaign-report' : link.hash === (hash || '#overview')));
   if (campaignMode) {
@@ -440,6 +634,7 @@ function showCampaignTab(tab) {
   document.querySelector('#campaign-summary-tab').hidden = !summary;
   document.querySelector('#campaign-media-tab').hidden = !media;
   document.querySelector('#campaign-tab-placeholder').hidden = summary || media;
+  document.querySelector('.period-control').hidden = media;
   document.querySelectorAll('[data-report-tab]').forEach(button => {
     const active = button.dataset.reportTab === tab;
     button.classList.toggle('active', active);
@@ -453,7 +648,10 @@ function showCampaignTab(tab) {
     document.querySelector('#campaign-tab-index').textContent = labels[tab][0];
     document.querySelector('#campaign-tab-title').textContent = labels[tab][1];
   }
-  if (media) applyMediaProgressColors();
+  if (media) {
+    applyMediaProgressColors();
+    loadCampaignMediaTable();
+  }
 }
 
 async function loadCampaignOptions() {
@@ -472,8 +670,8 @@ async function loadCampaignOptions() {
       }),
     ].join('');
     select.disabled = false;
-    campaignMediaOptions = result.mediaAdTypes ?? [];
-    selectedCampaignMedia = new Set(campaignMediaOptions);
+    campaignFilterRows = result.filterRows ?? [];
+    legacyCampaignMediaOptions = result.mediaAdTypes ?? [];
     updateCampaignDrilldown('campaign');
   } catch (error) {
     select.innerHTML = '<option value="all">캠페인 조회 실패</option>';
@@ -633,6 +831,11 @@ document.querySelectorAll('[data-time-unit]').forEach(button => button.addEventL
   trendTimeUnit = button.dataset.timeUnit;
   document.querySelectorAll('[data-time-unit]').forEach(item => item.classList.toggle('active', item === button));
   renderCampaignReport();
+}));
+document.querySelectorAll('[data-weekly-ga-view]').forEach(button => button.addEventListener('click', () => {
+  weeklyGaViewMode = button.dataset.weeklyGaView;
+  document.querySelectorAll('[data-weekly-ga-view]').forEach(item => item.classList.toggle('active', item === button));
+  renderWeeklyGaTable(latestWeeklyGaRows);
 }));
 window.addEventListener('hashchange', () => showReportView());
 window.addEventListener('resize', updateCampaignStickyOffsets);
