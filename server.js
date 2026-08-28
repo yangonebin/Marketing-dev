@@ -1,6 +1,6 @@
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { getAvailableMedia, parseMediaMixRows } from './campaign-filters.js';
+import { getAvailableMedia, parseHistoryRows, parseMediaMixRows, parseMediaMixTable, selectMediaMixColumns } from './campaign-filters.js';
 import { extname, join, normalize } from 'node:path';
 import { sign } from 'node:crypto';
 
@@ -21,7 +21,13 @@ function getPort(args = process.argv.slice(2), environment = process.env) {
   return 5173;
 }
 
+function getHost(args = process.argv.slice(2)) {
+  const hostArgument = args.find(argument => argument.startsWith('--host='));
+  return hostArgument ? hostArgument.slice('--host='.length) : '0.0.0.0';
+}
+
 const port = getPort();
+const host = getHost();
 const root = process.cwd();
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -33,7 +39,7 @@ const contentTypes = {
 
 const campaignSheet = {
   spreadsheetId: '1IP9rWvILocygHodSTiDxc5TDKB7LNnLJJNVJFTGlXN4',
-  ranges: ["'미디어믹스'!A37:Y1009", "'UTM 누적(26FW~)'!F3:V26", "'UTM 누적(26FW~)'!F46:AE1018"],
+  ranges: ["'미디어믹스'!A:AA", "'UTM 누적(26FW~)'!F3:V26", "'UTM 누적(26FW~)'!F46:AE1018", "'히스토리'!A:Z"],
 };
 let campaignCache = { expiresAt: 0, values: null };
 
@@ -78,8 +84,10 @@ async function getCampaignFilters() {
   const sheetResult = await sheetResponse.json();
   if (!sheetResponse.ok) throw new Error(`Google Sheets 조회 실패 (${sheetResponse.status})`);
 
-  const [mediaMixRows = [], utmIndexRows = [], utmRows = []] = (sheetResult.valueRanges ?? []).map(item => item.values ?? []);
+  const [mediaMixRows = [], utmIndexRows = [], utmRows = [], rawHistoryRows = []] = (sheetResult.valueRanges ?? []).map(item => item.values ?? []);
   const { campaigns, mediaAdTypes, filterRows } = parseMediaMixRows(mediaMixRows);
+  const mediaMixTable = parseMediaMixTable(mediaMixRows);
+  const historyRows = parseHistoryRows(rawHistoryRows);
   const mapping = new Map(mediaAdTypes.map(label => [label, new Set()]));
   utmIndexRows.forEach(row => {
     const label = String(row[0] ?? '').trim();
@@ -94,13 +102,14 @@ async function getCampaignFilters() {
     if (mapping.has(label) && segments.length >= 2) mapping.get(label).add(`_${segments.at(-2)}_${segments.at(-1)}`.toUpperCase());
   });
   const mediaFilters = Object.fromEntries([...mapping].map(([label, needles]) => [label, [...needles]]));
-  const values = { campaigns, mediaAdTypes, filterRows, mediaFilters };
+  const values = { campaigns, mediaAdTypes, filterRows, mediaFilters, historyRows, mediaMixTable };
   campaignCache = { expiresAt: Date.now() + 5 * 60 * 1000, values };
   return values;
 }
 
 async function getCampaignMediaTable({ campaign }) {
   const filters = await getCampaignFilters();
+  const mediaHistory = (filters.historyRows ?? []).filter(row => campaign === 'all' || row.campaign === campaign);
   const dateOrder = value => {
     const match = String(value).match(/(\d{1,2})월\s*(\d{1,2})일/);
     return match ? Number(match[1]) * 100 + Number(match[2]) : Number.MAX_SAFE_INTEGER;
@@ -152,17 +161,19 @@ async function getCampaignMediaTable({ campaign }) {
     COALESCE(SUM(cost), 0) AS cost,
     COALESCE(SUM(impression), 0) AS impressions,
     COALESCE(SUM(click), 0) AS clicks,
-    COALESCE(SUM(CASE WHEN media = '메타' THEN video_3s_view ELSE view_count END), 0) AS views
+    COALESCE(SUM(CASE WHEN media = '메타' THEN video_3s_view ELSE view_count END), 0) AS views,
+    COALESCE(ad_creative_name, '') AS ad_name
   FROM \`planar-method-169102.61217_blackyak.blackyak_media_data_view\`
   WHERE datestamp BETWEEN @start_date AND @end_date
     AND (@campaign = 'all' OR STRPOS(LOWER(COALESCE(campaign_name, '')), LOWER(@campaign)) > 0)
-  GROUP BY metric_date, campaign_name`;
+  GROUP BY metric_date, campaign_name, ad_creative_name`;
   const gaQuery = `WITH session_events AS (
     SELECT
       PARSE_DATE('%Y%m%d', _TABLE_SUFFIX) AS metric_date,
       user_pseudo_id,
       (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
       session_traffic_source_last_click.cross_channel_campaign.campaign_name AS event_campaign_name,
+      COALESCE(session_traffic_source_last_click.manual_campaign.term, collected_traffic_source.manual_term) AS event_term,
       event_name,
       ecommerce.purchase_revenue AS purchase_revenue
     FROM \`planar-method-169102.analytics_496808362.events_*\`
@@ -170,20 +181,22 @@ async function getCampaignMediaTable({ campaign }) {
   ), attributed AS (
     SELECT
       *,
-      COALESCE(event_campaign_name, MAX(event_campaign_name) OVER (PARTITION BY user_pseudo_id, ga_session_id)) AS campaign_name
+      COALESCE(event_campaign_name, MAX(event_campaign_name) OVER (PARTITION BY user_pseudo_id, ga_session_id)) AS campaign_name,
+      COALESCE(event_term, MAX(event_term) OVER (PARTITION BY user_pseudo_id, ga_session_id)) AS utm_term
     FROM session_events
   )
   SELECT
     CAST(metric_date AS STRING) AS metric_date,
     COALESCE(campaign_name, '') AS campaign_name,
+    COALESCE(utm_term, '') AS utm_term,
     COUNTIF(event_name = 'purchase') AS purchases,
     COALESCE(SUM(IF(event_name = 'purchase', purchase_revenue, 0)), 0) AS revenue
   FROM attributed
   WHERE @campaign = 'all' OR STRPOS(COALESCE(campaign_name, ''), @campaign) > 0
-  GROUP BY metric_date, campaign_name`;
+  GROUP BY metric_date, campaign_name, utm_term`;
   const [mediaResult, gaResult] = await Promise.all([execute(mediaQuery), execute(gaQuery)]);
-  const mediaRows = mediaResult.map(row => ({ metricDate: row.f[0]?.v, campaignName: row.f[1]?.v ?? '', cost: Number(row.f[2]?.v ?? 0), impressions: Number(row.f[3]?.v ?? 0), clicks: Number(row.f[4]?.v ?? 0), views: Number(row.f[5]?.v ?? 0) }));
-  const gaRows = gaResult.map(row => ({ metricDate: row.f[0]?.v, campaignName: row.f[1]?.v ?? '', purchases: Number(row.f[2]?.v ?? 0), revenue: Number(row.f[3]?.v ?? 0) }));
+  const mediaRows = mediaResult.map(row => ({ metricDate: row.f[0]?.v, campaignName: row.f[1]?.v ?? '', cost: Number(row.f[2]?.v ?? 0), impressions: Number(row.f[3]?.v ?? 0), clicks: Number(row.f[4]?.v ?? 0), views: Number(row.f[5]?.v ?? 0), adName: row.f[6]?.v ?? '' }));
+  const gaRows = gaResult.map(row => ({ metricDate: row.f[0]?.v, campaignName: row.f[1]?.v ?? '', utmTerm: row.f[2]?.v ?? '', purchases: Number(row.f[3]?.v ?? 0), revenue: Number(row.f[4]?.v ?? 0) }));
   const platformNames = { YT: 'YouTube', MT: 'Meta', NV: 'Naver', GG: 'Google', TT: 'TikTok', TV: 'TV', TS: 'Toss' };
   const matches = (label, campaignName) => (filters.mediaFilters[label] ?? []).some(needle => campaignName.toUpperCase().includes(needle));
   const rows = attributes.map(attribute => {
@@ -254,7 +267,97 @@ async function getCampaignMediaTable({ campaign }) {
     const rates = Object.fromEntries(Object.keys(actual).map(metric => [metric, target[metric] ? actual[metric] / target[metric] * 100 : 0]));
     return { business, overallStart, overallEnd, firstLiveDate, dateProgress: totalDays ? Math.min(100, elapsedDays / totalDays * 100) : 0, actual, target, rates };
   });
-  return { campaign, startDate, endDate, rows, businessProgress };
+  const mondayOf = value => {
+    const date = new Date(`${value}T00:00:00Z`);
+    const day = date.getUTCDay();
+    date.setUTCDate(date.getUTCDate() - (day === 0 ? 6 : day - 1));
+    return isoDate(date);
+  };
+  const dailyMap = new Map();
+  const mediaDailyMap = new Map();
+  const mediaCreativeMap = new Map();
+  const dailyRow = (metricDate, business) => {
+    const key = `${metricDate}\u0000${business}`;
+    if (!dailyMap.has(key)) dailyMap.set(key, { metricDate, business, cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+    return dailyMap.get(key);
+  };
+  attributes.forEach(attribute => {
+    const rowStartDate = operationIso(attribute.operationStart);
+    const [platformCode, ...adTypeParts] = attribute.mediaAdType.split(' - ');
+    const mediaDailyRow = metricDate => {
+      const key = `${metricDate}\u0000${attribute.business}\u0000${attribute.kpi}\u0000${attribute.mediaAdType}`;
+      if (!mediaDailyMap.has(key)) mediaDailyMap.set(key, { metricDate, business: attribute.business, kpi: attribute.kpi, platform: platformNames[platformCode] ?? platformCode, media: adTypeParts.join(' - ') || attribute.mediaAdType, mediaAdType: attribute.mediaAdType, cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+      return mediaDailyMap.get(key);
+    };
+    mediaRows.filter(row => row.metricDate >= rowStartDate && row.metricDate <= endDate && matches(attribute.mediaAdType, row.campaignName)).forEach(row => {
+      const daily = dailyRow(row.metricDate, attribute.business);
+      daily.cost += row.cost;
+      daily.impressions += row.impressions;
+      daily.clicks += row.clicks;
+      daily.views += row.views;
+      const mediaDaily = mediaDailyRow(row.metricDate);
+      mediaDaily.cost += row.cost;
+      mediaDaily.impressions += row.impressions;
+      mediaDaily.clicks += row.clicks;
+      mediaDaily.views += row.views;
+      const creativeKey = `${attribute.business}\u0000${attribute.kpi}\u0000${attribute.mediaAdType}\u0000${row.adName || '미분류 소재'}`;
+      if (!mediaCreativeMap.has(creativeKey)) mediaCreativeMap.set(creativeKey, { business: attribute.business, kpi: attribute.kpi, mediaAdType: attribute.mediaAdType, operationStart: attribute.operationStart, adName: row.adName || '미분류 소재', cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+      const creative = mediaCreativeMap.get(creativeKey);
+      creative.cost += row.cost;
+      creative.impressions += row.impressions;
+      creative.clicks += row.clicks;
+      creative.views += row.views;
+    });
+    gaRows.filter(row => row.metricDate >= rowStartDate && row.metricDate <= endDate && matches(attribute.mediaAdType, row.campaignName)).forEach(row => {
+      const mediaDaily = mediaDailyRow(row.metricDate);
+      mediaDaily.purchases += row.purchases;
+      mediaDaily.revenue += row.revenue;
+    });
+  });
+  businessProgress.forEach(item => {
+    gaRows.filter(row => row.metricDate >= item.overallStart && row.metricDate <= endDate && row.campaignName.toUpperCase().includes(item.business)).forEach(row => {
+      const daily = dailyRow(row.metricDate, item.business);
+      daily.purchases += row.purchases;
+      daily.revenue += row.revenue;
+    });
+  });
+  mediaCreativeMap.forEach(creative => {
+    const matchingTerm = creative.adName.split('(')[0].trim();
+    if (!matchingTerm || creative.adName === '미분류 소재') return;
+    gaRows.filter(row => row.metricDate >= operationIso(creative.operationStart) && row.metricDate <= endDate && matches(creative.mediaAdType, row.campaignName) && row.utmTerm.trim() === matchingTerm).forEach(row => {
+      creative.purchases += row.purchases;
+      creative.revenue += row.revenue;
+    });
+  });
+  const dailyMedia = [...dailyMap.values()].filter(row => row.cost || row.impressions || row.clicks || row.views || row.purchases || row.revenue).map(row => ({
+    ...row,
+    cpm: row.impressions ? row.cost / row.impressions * 1000 : 0,
+    cpc: row.clicks ? row.cost / row.clicks : 0,
+    cpv: row.views ? row.cost / row.views : 0,
+    ctr: row.impressions ? row.clicks / row.impressions * 100 : 0,
+    vtr: row.impressions ? row.views / row.impressions * 100 : 0,
+    cpo: row.purchases ? row.cost / row.purchases : 0,
+    cvr: row.clicks ? row.purchases / row.clicks * 100 : 0,
+    roas: row.cost ? row.revenue / row.cost * 100 : 0,
+  })).sort((a, b) => a.metricDate.localeCompare(b.metricDate) || a.business.localeCompare(b.business));
+  const mediaDaily = [...mediaDailyMap.values()].filter(row => row.cost || row.impressions || row.clicks || row.views || row.purchases || row.revenue).sort((a, b) => a.metricDate.localeCompare(b.metricDate) || a.mediaAdType.localeCompare(b.mediaAdType, 'ko'));
+  const mediaCreative = [...mediaCreativeMap.values()].filter(row => row.cost || row.impressions || row.clicks || row.views).sort((a, b) => b.cost - a.cost || a.adName.localeCompare(b.adName, 'ko'));
+  const weeklyMap = new Map();
+  dailyMedia.forEach(row => {
+    const weekStart = mondayOf(row.metricDate);
+    const key = `${weekStart}\u0000${row.business}`;
+    if (!weeklyMap.has(key)) weeklyMap.set(key, { weekStart, business: row.business, cost: 0, impressions: 0, clicks: 0, purchases: 0, revenue: 0 });
+    const weekly = weeklyMap.get(key);
+    ['cost', 'impressions', 'clicks', 'purchases', 'revenue'].forEach(metric => { weekly[metric] += row[metric]; });
+  });
+  const weeklyMedia = [...weeklyMap.values()].map(row => ({ ...row, ctr: row.impressions ? row.clicks / row.impressions * 100 : 0, roas: row.cost ? row.revenue / row.cost * 100 : 0 })).sort((a, b) => b.weekStart.localeCompare(a.weekStart) || a.business.localeCompare(b.business));
+  const weeklyTotal = businessProgress.reduce((total, item) => {
+    Object.keys(total).forEach(metric => { total[metric] += item.actual[metric]; });
+    return total;
+  }, { cost: 0, impressions: 0, clicks: 0, purchases: 0, revenue: 0 });
+  weeklyTotal.ctr = weeklyTotal.impressions ? weeklyTotal.clicks / weeklyTotal.impressions * 100 : 0;
+  weeklyTotal.roas = weeklyTotal.cost ? weeklyTotal.revenue / weeklyTotal.cost * 100 : 0;
+  return { campaign, startDate, endDate, rows, businessProgress, weeklyMedia, weeklyTotal, dailyMedia, mediaDaily, mediaCreative, mediaHistory };
 }
 
 async function getCampaignMediaMetrics({ campaign, business, mediaAdTypes, mediaNeedles, startDate, endDate }) {
@@ -305,6 +408,12 @@ async function getCampaignMediaMetrics({ campaign, business, mediaAdTypes, media
   ), ga_daily AS (
     SELECT
       PARSE_DATE('%Y%m%d', _TABLE_SUFFIX) AS metric_date,
+      COUNT(DISTINCT IF(
+        (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') IS NULL,
+        NULL,
+        CONCAT(user_pseudo_id, '-', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING))
+      )) AS sessions,
+      COUNT(DISTINCT user_pseudo_id) AS users,
       COUNTIF(event_name = 'purchase') AS purchases,
       COALESCE(SUM(IF(event_name = 'purchase', ecommerce.purchase_revenue, 0)), 0) AS revenue
     FROM \`planar-method-169102.analytics_496808362.events_*\`
@@ -316,6 +425,22 @@ async function getCampaignMediaMetrics({ campaign, business, mediaAdTypes, media
         WHERE STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), media_needle) > 0
       )
     GROUP BY metric_date
+  ), ga_totals AS (
+    SELECT
+      COUNT(DISTINCT IF(
+        (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') IS NULL,
+        NULL,
+        CONCAT(user_pseudo_id, '-', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING))
+      )) AS sessions,
+      COUNT(DISTINCT user_pseudo_id) AS users
+    FROM \`planar-method-169102.analytics_496808362.events_*\`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date) AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND (@campaign = 'all' OR STRPOS(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, ''), @campaign) > 0)
+      AND (@business = 'all' OR STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), @business) > 0)
+      AND EXISTS (
+        SELECT 1 FROM UNNEST(@media_needles) AS media_needle
+        WHERE STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), media_needle) > 0
+      )
   ), dates AS (
     SELECT metric_date FROM UNNEST(GENERATE_DATE_ARRAY(@start_date, @end_date)) AS metric_date
   )
@@ -326,10 +451,15 @@ async function getCampaignMediaMetrics({ campaign, business, mediaAdTypes, media
     COALESCE(views, 0) AS views,
     COALESCE(cost, 0) AS cost,
     COALESCE(purchases, 0) AS purchases,
-    COALESCE(revenue, 0) AS revenue
+    COALESCE(revenue, 0) AS revenue,
+    COALESCE(ga_daily.sessions, 0) AS sessions,
+    COALESCE(ga_daily.users, 0) AS users,
+    COALESCE(ga_totals.sessions, 0) AS total_sessions,
+    COALESCE(ga_totals.users, 0) AS total_users
   FROM dates
   LEFT JOIN media_daily USING (metric_date)
   LEFT JOIN ga_daily USING (metric_date)
+  CROSS JOIN ga_totals
   ORDER BY metric_date`;
   const queryResult = await executeQuery(query);
 
@@ -343,6 +473,8 @@ async function getCampaignMediaMetrics({ campaign, business, mediaAdTypes, media
       cost: Number(values[4]?.v ?? 0),
       conversions: Number(values[5]?.v ?? 0),
       revenue: Number(values[6]?.v ?? 0),
+      sessions: Number(values[7]?.v ?? 0),
+      users: Number(values[8]?.v ?? 0),
     };
     return {
       ...item,
@@ -360,6 +492,8 @@ async function getCampaignMediaMetrics({ campaign, business, mediaAdTypes, media
   }, { impressions: 0, clicks: 0, views: 0, cost: 0, conversions: 0, revenue: 0 });
   const metrics = {
     ...totals,
+    sessions: Number(queryResult.rows?.[0]?.f?.[9]?.v ?? 0),
+    users: Number(queryResult.rows?.[0]?.f?.[10]?.v ?? 0),
     cpm: totals.impressions ? totals.cost / totals.impressions * 1000 : 0,
     ctr: totals.impressions ? totals.clicks / totals.impressions * 100 : 0,
     cpv: totals.views ? totals.cost / totals.views : 0,
@@ -437,8 +571,120 @@ async function getCampaignMediaMetrics({ campaign, business, mediaAdTypes, media
   return { metrics, trend, weeklyGa };
 }
 
+async function getOverviewMetrics({ business, startDate, endDate }) {
+  const accessToken = await getGoogleAccessToken('https://www.googleapis.com/auth/bigquery.readonly');
+  const queryParameters = [
+    { name: 'business', parameterType: { type: 'STRING' }, parameterValue: { value: business } },
+    { name: 'start_date', parameterType: { type: 'DATE' }, parameterValue: { value: startDate } },
+    { name: 'end_date', parameterType: { type: 'DATE' }, parameterValue: { value: endDate } },
+  ];
+  const execute = async query => {
+    const queryResponse = await fetch('https://bigquery.googleapis.com/bigquery/v2/projects/planar-method-169102/queries', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, useLegacySql: false, location: 'asia-northeast3', timeoutMs: 30000, parameterMode: 'NAMED', queryParameters }),
+    });
+    const result = await queryResponse.json();
+    if (!queryResponse.ok || result.errors?.length) throw new Error(`BigQuery 조회 실패 (${queryResponse.status}): ${result.errors?.[0]?.message ?? result.error?.message ?? '알 수 없는 오류'}`);
+    if (!result.jobComplete) throw new Error('BigQuery 조회 시간이 초과되었습니다.');
+    return result.rows ?? [];
+  };
+  const dailyQuery = `WITH media_daily AS (
+    SELECT
+      datestamp AS metric_date,
+      COALESCE(SUM(impression), 0) AS impressions,
+      COALESCE(SUM(click), 0) AS clicks,
+      COALESCE(SUM(CASE WHEN media = '메타' THEN video_3s_view ELSE view_count END), 0) AS views,
+      COALESCE(SUM(cost), 0) AS cost
+    FROM \`planar-method-169102.61217_blackyak.blackyak_media_data_view\`
+    WHERE datestamp BETWEEN @start_date AND @end_date
+      AND (@business = 'all' OR IF(STRPOS(UPPER(COALESCE(campaign_name, '')), 'MKT') > 0, 'MKT', 'PERF') = @business)
+    GROUP BY metric_date
+  ), ga_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', _TABLE_SUFFIX) AS metric_date,
+      CASE
+        WHEN STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), 'MKT') > 0 THEN 'MKT'
+        WHEN STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), '_EC_') > 0
+          OR STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), 'PERF') > 0 THEN 'PERF'
+        ELSE NULL
+      END AS business_unit,
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      event_name,
+      ecommerce.purchase_revenue AS purchase_revenue
+    FROM \`planar-method-169102.analytics_496808362.events_*\`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date) AND FORMAT_DATE('%Y%m%d', @end_date)
+  ), ga_daily AS (
+    SELECT
+      metric_date,
+      COUNT(DISTINCT IF(ga_session_id IS NULL, NULL, CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING)))) AS sessions,
+      COUNT(DISTINCT user_pseudo_id) AS users,
+      COUNTIF(event_name = 'purchase') AS purchases,
+      COALESCE(SUM(IF(event_name = 'purchase', purchase_revenue, 0)), 0) AS revenue
+    FROM ga_events
+    WHERE business_unit IS NOT NULL AND (@business = 'all' OR business_unit = @business)
+    GROUP BY metric_date
+  ), dates AS (
+    SELECT metric_date FROM UNNEST(GENERATE_DATE_ARRAY(@start_date, @end_date)) AS metric_date
+  )
+  SELECT CAST(dates.metric_date AS STRING), COALESCE(impressions, 0), COALESCE(clicks, 0), COALESCE(views, 0), COALESCE(cost, 0),
+    COALESCE(purchases, 0), COALESCE(revenue, 0), COALESCE(sessions, 0), COALESCE(users, 0)
+  FROM dates LEFT JOIN media_daily USING (metric_date) LEFT JOIN ga_daily USING (metric_date)
+  ORDER BY metric_date`;
+  const channelQuery = `SELECT COALESCE(media, '미분류') AS media, COALESCE(SUM(cost), 0) AS cost
+    FROM \`planar-method-169102.61217_blackyak.blackyak_media_data_view\`
+    WHERE datestamp BETWEEN @start_date AND @end_date
+      AND (@business = 'all' OR IF(STRPOS(UPPER(COALESCE(campaign_name, '')), 'MKT') > 0, 'MKT', 'PERF') = @business)
+    GROUP BY media ORDER BY cost DESC`;
+  const [dailyRows, channelRows] = await Promise.all([execute(dailyQuery), execute(channelQuery)]);
+  const trend = dailyRows.map(row => ({
+    date: row.f[0]?.v,
+    impressions: Number(row.f[1]?.v ?? 0), clicks: Number(row.f[2]?.v ?? 0), views: Number(row.f[3]?.v ?? 0), cost: Number(row.f[4]?.v ?? 0),
+    conversions: Number(row.f[5]?.v ?? 0), revenue: Number(row.f[6]?.v ?? 0), sessions: Number(row.f[7]?.v ?? 0), users: Number(row.f[8]?.v ?? 0),
+  }));
+  const totals = trend.reduce((sum, row) => {
+    ['impressions', 'clicks', 'views', 'cost', 'conversions', 'revenue', 'sessions', 'users'].forEach(key => { sum[key] += row[key]; });
+    return sum;
+  }, { impressions: 0, clicks: 0, views: 0, cost: 0, conversions: 0, revenue: 0, sessions: 0, users: 0 });
+  const metrics = {
+    ...totals,
+    cpm: totals.impressions ? totals.cost / totals.impressions * 1000 : 0,
+    ctr: totals.impressions ? totals.clicks / totals.impressions * 100 : 0,
+    cpv: totals.views ? totals.cost / totals.views : 0,
+    purchaseRate: totals.clicks ? totals.conversions / totals.clicks * 100 : 0,
+    cpo: totals.conversions ? totals.cost / totals.conversions : 0,
+    roas: totals.cost ? totals.revenue / totals.cost * 100 : 0,
+  };
+  const channels = channelRows.map(row => ({ channel: row.f[0]?.v ?? '미분류', cost: Number(row.f[1]?.v ?? 0) }));
+  return { metrics, trend, channels };
+}
+
 const server = createServer(async (request, response) => {
   const pathname = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname);
+  if (pathname === '/api/overview-metrics') {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const requestedBusiness = url.searchParams.get('business') || 'all';
+    const business = ['all', 'MKT', 'PERF'].includes(requestedBusiness) ? requestedBusiness : 'all';
+    const startDate = url.searchParams.get('start');
+    const endDate = url.searchParams.get('end');
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '');
+    if (!validDate(startDate) || !validDate(endDate)) {
+      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: '조회 기간이 올바르지 않습니다.' }));
+      return;
+    }
+    try {
+      const result = await getOverviewMetrics({ business, startDate, endDate });
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ business, startDate, endDate, ...result }));
+    } catch (error) {
+      console.error(`Overview metrics error: ${error.message}`);
+      response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ error: error.message }));
+    }
+    return;
+  }
   if (pathname === '/api/campaigns') {
     try {
       const { campaigns, mediaAdTypes, filterRows } = await getCampaignFilters();
@@ -479,6 +725,25 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
+  if (pathname === '/api/campaign-media-mix') {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const campaign = url.searchParams.get('campaign')?.trim() || 'all';
+    try {
+      const filters = await getCampaignFilters();
+      const table = selectMediaMixColumns(filters.mediaMixTable ?? { headers: [], rows: [] }, [
+        '사업부', 'KPI', 'Media - AD Type', '비고', '소재', 'Type', '시작 일', '종료 일', 'Budget', '성/연령', 'Targeting',
+        'Imps', 'Click', 'View', 'CPM', 'CPC', 'CPV', 'CTR', 'VTR', '구매', '매출액', 'CVR', 'ROAS',
+      ]);
+      const rows = table.rows.filter(row => campaign === 'all' || row.campaign === campaign).map(row => row.values);
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ campaign, headers: table.headers, rows }));
+    } catch (error) {
+      console.error(`Campaign media mix error: ${error.message}`);
+      response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ error: error.message }));
+    }
+    return;
+  }
   if (pathname === '/api/campaign-media-table') {
     const url = new URL(request.url, `http://${request.headers.host}`);
     const campaign = url.searchParams.get('campaign')?.trim() || 'all';
@@ -504,11 +769,11 @@ const server = createServer(async (request, response) => {
 
   response.writeHead(200, {
     'Content-Type': contentTypes[extname(filePath)] ?? 'application/octet-stream',
-    'Cache-Control': 'no-cache',
+    'Cache-Control': 'no-store',
   });
   createReadStream(filePath).pipe(response);
 });
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`Marketing dashboard is running at http://localhost:${port}`);
+server.listen(port, host, () => {
+  console.log(`Marketing dashboard is running at http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
 });
