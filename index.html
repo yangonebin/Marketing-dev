@@ -16,10 +16,9 @@
         <nav aria-label="주요 메뉴">
           <p class="nav-label">REPORT</p>
           <a class="active" href="#overview"><span>01</span>성과 개요</a>
-          <a href="#trend"><span>02</span>성과 추이</a>
-          <a href="#channels"><span>03</span>매체 분석</a>
-          <a href="#branding-performance"><span>04</span>브랜딩/퍼포먼스</a>
-          <a href="#campaign-report"><span>05</span>캠페인 리포트</a>
+          <a href="#media-product-report"><span>02</span>매체 별 리포트</a>
+          <a href="#ga-report"><span>03</span>GA 리포트</a>
+          <a href="#campaign-report"><span>04</span>캠페인 리포트</a>
         </nav>
 
         <div class="sidebar-status">
@@ -96,6 +95,8 @@
               </div>
               <div class="period-presets comparison-period-presets" aria-label="빠른 비교 기간">
                 <button type="button" data-comparison-period="previous">직전 동일 기간</button>
+                <button type="button" data-comparison-period="previous-weekday">전주 동요일</button>
+                <button type="button" data-comparison-period="previous-month-weekday">전월 동요일</button>
                 <button type="button" data-comparison-period="last-year">전년 동일 기간</button>
                 <button type="button" data-comparison-period="custom">날짜 선택</button>
               </div>
@@ -130,12 +131,57 @@
           <article id="branding-performance" class="panel daily-trend-panel">
             <div class="panel-heading">
               <div><p class="section-number">DAILY TREND</p><h2>일자별 트렌드</h2></div>
-              <div class="trend-selects"><span><i class="cost"></i>광고비</span><span><i class="ctr"></i>CTR</span></div>
+              <div class="trend-selects"><span><i class="cost"></i>광고비</span><span><i class="ctr"></i>매출</span></div>
             </div>
-            <div id="daily-trend" class="daily-trend" aria-label="일자별 광고비 및 CTR 추이"></div>
+            <div id="daily-trend" class="daily-trend" aria-label="일자별 광고비 및 매출 추이"></div>
           </article>
         </section>
         </div>
+
+        <section id="media-product-report" class="report-view media-product-report" hidden aria-labelledby="media-product-report-title">
+          <div class="media-product-hero">
+            <div>
+              <p class="section-number">MEDIA × PRODUCT REPORT</p>
+              <h2 id="media-product-report-title">매체 별 리포트</h2>
+              <p class="panel-subtitle">매체와 캠페인 유형별 광고 성과를 선택 기간과 비교 기간 기준으로 확인하세요. · 실제 데이터</p>
+            </div>
+            <div class="media-product-toggle-stack">
+              <div class="media-filter-row"><span>매체</span><div class="media-pill-toggle" aria-label="매체 선택"><button class="active" type="button" data-media-product-media="all">전체</button><button type="button" data-media-product-media="naver-sa">네이버 SA</button><button type="button" data-media-product-media="naver-gfa">네이버 GFA</button><button type="button" data-media-product-media="meta">메타</button><button type="button" data-media-product-media="google">구글</button><button type="button" data-media-product-media="criteo">크리테오</button></div></div>
+              <div class="business-toggle" aria-label="사업부 선택">
+                <button class="active" type="button" data-media-product-business="all">전체</button>
+                <button type="button" data-media-product-business="MKT">MKT</button>
+                <button type="button" data-media-product-business="PERF">PERF</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="media-product-kpis" class="campaign-kpis overview-scoreboard media-product-kpis" aria-label="매체 상품 요약 지표"><p class="empty-state">성과 데이터를 불러오는 중…</p></div>
+
+          <div class="media-product-grid">
+            <article class="panel media-product-ranking-panel">
+              <div class="panel-heading"><div><p class="section-number">DAILY PERFORMANCE</p><h2>일자 별 성과</h2><p class="panel-subtitle">선택한 매체의 일자별 광고비·매출 추이</p></div><div class="trend-selects"><span><i class="cost"></i>광고비</span><span><i class="ctr"></i>매출</span></div></div>
+              <div id="media-product-ranking" class="media-product-ranking"><p class="empty-state">데이터를 불러오는 중…</p></div>
+            </article>
+          </div>
+
+          <article class="panel media-product-table-panel">
+            <div class="panel-heading"><div><p class="section-number">DAILY DETAIL</p><h2>일자별 상세 성과</h2><p class="panel-subtitle">선택한 매체와 사업부의 성과를 일자별 합계로 표시합니다.</p></div><span class="updated-at">단위 · 원, 건, %</span></div>
+            <div class="table-wrap"><table class="media-product-table media-product-daily-table"><thead><tr><th>일자</th><th>광고비</th><th>노출</th><th>클릭</th><th>조회</th><th>CPM</th><th>CPC</th><th>CPV</th><th>CTR</th><th>구매수</th><th>총수익</th><th>CPO</th><th>CVR</th><th>ROAS</th><th>광고비 증감</th></tr></thead><tbody id="media-product-table-body"><tr><td colspan="15" class="empty-state">데이터를 불러오는 중…</td></tr></tbody></table></div>
+          </article>
+        </section>
+
+        <section id="ga-report" class="report-view ga-report" hidden aria-labelledby="ga-report-title">
+          <div class="ga-report-hero">
+            <div><p class="section-number">GOOGLE ANALYTICS REPORT</p><h2 id="ga-report-title">GA 리포트</h2><p class="panel-subtitle">사이트 유입부터 구매까지의 고객 행동과 매출 흐름을 확인하세요. · 실제 데이터</p></div>
+            <div class="business-toggle" aria-label="GA 사업부 선택"><button class="active" type="button" data-ga-business="all">전체</button><button type="button" data-ga-business="MKT">MKT</button><button type="button" data-ga-business="PERF">PERF</button></div>
+          </div>
+          <div id="ga-kpis" class="ga-kpis"><p class="empty-state">GA 데이터를 불러오는 중…</p></div>
+          <div class="ga-report-grid">
+            <article class="panel ga-trend-panel"><div class="panel-heading"><div><p class="section-number">DAILY GA TREND</p><h2 id="ga-trend-title">일자별 세션 수·총수익</h2><p id="ga-trend-description" class="panel-subtitle">상단 스코어보드에서 최대 3개 지표를 선택할 수 있습니다.</p></div><div id="ga-trend-legend" class="trend-selects"><span><i class="ga-series-1"></i>세션 수</span><span><i class="ga-series-2"></i>총수익</span></div></div><div id="ga-daily-chart" class="ga-daily-chart"><p class="empty-state">데이터를 불러오는 중…</p></div></article>
+            <article class="panel ga-campaign-panel"><div class="panel-heading"><div><p class="section-number">TOP PURCHASE CAMPAIGNS</p><h2>구매 TOP 10 세션 캠페인</h2><p class="panel-subtitle">GA 세션 캠페인 · 구매수 내림차순<br>※ (direct), (referral), (not set), (organic), (none), (unassigned) 제외</p></div></div><div id="ga-purchase-campaigns" class="ga-purchase-campaigns"><p class="empty-state">데이터를 불러오는 중…</p></div></article>
+          </div>
+          <article class="panel ga-daily-table-panel"><div class="panel-heading"><div><p class="section-number">DAILY GA DETAIL</p><h2>일자별 GA 상세</h2><p class="panel-subtitle">조회 기간 내 일자별 사용자 행동·장바구니·구매 성과</p></div><span class="updated-at">단위 · 명, 건, 원, %</span></div><div class="table-wrap"><table class="ga-daily-table"><thead><tr><th>일자</th><th>세션</th><th>사용자</th><th>장바구니 추가</th><th>장바구니 전환율</th><th>구매수</th><th>매출액</th><th>구매 전환율</th><th>세션당 매출</th></tr></thead><tbody id="ga-daily-table-body"><tr><td colspan="9" class="empty-state">데이터를 불러오는 중…</td></tr></tbody></table></div></article>
+        </section>
 
         <section id="campaign-report" class="report-view campaign-report" hidden aria-labelledby="campaign-report-title">
           <nav class="report-tabs" aria-label="캠페인 리포트 세부 메뉴">
@@ -212,6 +258,16 @@
               <div class="table-wrap"><table class="media-detail-table media-daily-table"><thead><tr class="media-group-head"><th colspan="1" class="attribute-group"><span>01</span>속성</th><th colspan="9" class="media-metric-group"><span>02</span>매체 데이터</th><th colspan="5" class="purchase-group"><span>03</span>구매 데이터</th></tr><tr><th>일자</th><th>광고비</th><th>노출</th><th>클릭</th><th>조회</th><th>CPM</th><th>CPC</th><th>CPV</th><th>CTR</th><th>VTR</th><th>구매수</th><th>총수익</th><th>CPO</th><th>CVR</th><th>ROAS</th></tr></thead><tbody id="campaign-media-daily-body"><tr><td colspan="15" class="empty-state">일자별 데이터를 불러오는 중…</td></tr></tbody></table></div>
             </article>
           </div>
+          <div id="campaign-creative-tab" class="campaign-tab-panel campaign-creative-report" hidden>
+            <div class="media-report-header">
+              <div><p class="section-number">CAMPAIGN CREATIVE LIBRARY</p><h2>소재</h2><p class="panel-subtitle">선택한 캠페인에 이미지를 등록하고 소재 라이브러리로 관리합니다.</p></div>
+              <button id="creative-upload-open" class="creative-upload-open" type="button">업로드</button>
+            </div>
+            <article class="panel creative-library-panel">
+              <div class="panel-heading"><div><p class="section-number">CREATIVE LIBRARY</p><h2>캠페인 등록 소재</h2><p class="panel-subtitle">현재 선택한 캠페인에 연결된 이미지입니다.</p></div><span id="creative-count" class="updated-at">0개 소재</span></div>
+              <div id="creative-library" class="creative-library"><p class="empty-state">캠페인을 선택해 주세요.</p></div>
+            </article>
+          </div>
           <div id="campaign-mix-tab" class="campaign-tab-panel campaign-mix-report" hidden>
             <div class="media-report-header">
               <div><p class="section-number">MEDIA MIX PLAN</p><h2>미디어믹스</h2><p class="panel-subtitle">구글 시트 ‘미디어믹스’의 선택 캠페인 데이터를 원문 기준으로 표시합니다.</p></div>
@@ -221,15 +277,38 @@
               <div class="table-wrap campaign-mix-table-wrap"><table id="campaign-mix-table" class="campaign-mix-table"><thead id="campaign-mix-head"></thead><tbody id="campaign-mix-body"><tr><td class="empty-state">미디어믹스를 불러오는 중…</td></tr></tbody></table></div>
             </article>
           </div>
-          <div id="campaign-tab-placeholder" class="campaign-tab-panel campaign-tab-placeholder" hidden>
-            <span id="campaign-tab-index">02</span>
-            <p class="section-number">CAMPAIGN REPORT</p>
-            <h2 id="campaign-tab-title">매체 데이터</h2>
-            <p>상세 리포트 영역을 준비하고 있습니다.</p>
-          </div>
         </section>
       </main>
     </div>
+    <dialog id="creative-upload-dialog" class="creative-upload-dialog" aria-labelledby="creative-upload-dialog-title">
+      <div class="creative-upload-heading"><div><p class="section-number">UPLOAD CREATIVE</p><h2 id="creative-upload-dialog-title">소재 이미지 업로드</h2><p id="creative-campaign-guide" class="panel-subtitle">상단에서 캠페인을 선택해야 업로드할 수 있습니다.</p></div><button id="creative-upload-close" type="button" aria-label="닫기">×</button></div>
+      <span class="creative-upload-rule">PNG · JPG · WEBP · GIF / 파일당 최대 8MB · 복수 선택 가능</span>
+      <form id="creative-upload-form" class="creative-upload-form">
+        <label>매체<strong>필수</strong><select id="creative-media" name="media" required><option value="">캠페인을 먼저 선택해 주세요</option></select></label>
+        <label class="creative-label-field">소재 라벨<strong>필수</strong><input id="creative-label" name="label" type="text" maxlength="120" placeholder="예: 스톤마스터 메인 비주얼" autocomplete="off" aria-autocomplete="list" aria-controls="creative-label-suggestions" required><div id="creative-label-suggestions" class="creative-label-suggestions" role="listbox" hidden></div></label>
+        <fieldset class="creative-type-field"><legend>소재 유형 <strong>필수</strong></legend><div><label><input type="radio" name="creative-type" value="영상" required><i></i><span>영상</span></label><label><input type="radio" name="creative-type" value="배너" required><i></i><span>배너</span></label></div></fieldset>
+        <label class="creative-file-field">이미지<strong>필수 · 복수 선택 가능</strong><input id="creative-file" name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple required><span id="creative-file-name">이미지 선택 또는 Ctrl+V로 붙여넣기</span></label>
+        <button id="creative-upload-submit" type="submit">소재 일괄 업로드</button>
+      </form>
+      <p id="creative-upload-message" class="creative-upload-message" role="status"></p>
+    </dialog>
+    <dialog id="creative-gallery-dialog" class="creative-gallery-dialog" aria-labelledby="creative-gallery-title">
+      <div class="creative-gallery-heading"><div><p class="section-number">CREATIVE LABEL</p><h2 id="creative-gallery-title">소재 라벨</h2><p id="creative-gallery-subtitle" class="panel-subtitle"></p></div><button id="creative-gallery-close" type="button" aria-label="닫기">×</button></div>
+      <div id="creative-gallery" class="creative-gallery"></div>
+      <p id="creative-gallery-message" class="creative-gallery-message" role="status"></p>
+    </dialog>
+    <dialog id="creative-edit-dialog" class="creative-upload-dialog creative-edit-dialog" aria-labelledby="creative-edit-title">
+      <div class="creative-upload-heading"><div><p class="section-number">EDIT CREATIVE</p><h2 id="creative-edit-title">소재 정보 수정</h2><p class="panel-subtitle">선택한 이미지의 분류 정보를 수정합니다.</p></div><button id="creative-edit-close" type="button" aria-label="닫기">×</button></div>
+      <div class="creative-edit-preview"><img id="creative-edit-image" alt="수정할 소재 미리보기"></div>
+      <form id="creative-edit-form" class="creative-upload-form">
+        <input id="creative-edit-id" type="hidden">
+        <label>매체<strong>필수</strong><select id="creative-edit-media" required></select></label>
+        <label>소재 라벨<strong>필수</strong><input id="creative-edit-label" type="text" maxlength="120" required></label>
+        <fieldset class="creative-type-field"><legend>소재 유형 <strong>필수</strong></legend><div><label><input type="radio" name="edit-creative-type" value="영상" required><i></i><span>영상</span></label><label><input type="radio" name="edit-creative-type" value="배너" required><i></i><span>배너</span></label></div></fieldset>
+        <button id="creative-edit-submit" type="submit">수정 내용 저장</button>
+      </form>
+      <p id="creative-edit-message" class="creative-upload-message" role="status"></p>
+    </dialog>
     <dialog id="media-detail-dialog" class="media-detail-dialog" aria-labelledby="media-detail-dialog-title">
       <div class="media-dialog-head"><div><p class="section-number">MEDIA DRILLDOWN</p><h2 id="media-detail-dialog-title">매체 상세</h2><p id="media-detail-dialog-subtitle" class="panel-subtitle"></p><small id="media-detail-total-check" class="media-detail-total-check"></small></div><button id="media-detail-dialog-close" type="button" aria-label="닫기">×</button></div>
       <section><h3>일자별 데이터</h3><div class="table-wrap"><table class="media-dialog-table"><thead><tr><th>일자</th><th>광고비</th><th>노출</th><th>클릭</th><th>조회</th><th>CPM</th><th>CPC</th><th>CPV</th><th>CTR</th><th>VTR</th><th>구매수</th><th>총수익</th><th>CPO</th><th>CVR</th><th>ROAS</th></tr></thead><tbody id="media-dialog-daily-body"></tbody></table></div></section>
