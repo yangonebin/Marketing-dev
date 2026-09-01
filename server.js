@@ -1,8 +1,8 @@
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { getAvailableMedia, parseHistoryRows, parseMediaMixRows, parseMediaMixTable, selectMediaMixColumns } from './campaign-filters.js';
 import { extname, join, normalize } from 'node:path';
-import { sign } from 'node:crypto';
+import { randomUUID, sign } from 'node:crypto';
 
 function getPort(args = process.argv.slice(2), environment = process.env) {
   const portFlagIndex = args.findIndex(argument =>
@@ -29,13 +29,55 @@ function getHost(args = process.argv.slice(2)) {
 const port = getPort();
 const host = getHost();
 const root = process.cwd();
+const creativeDataRoot = process.env.DASHBOARD_UPLOAD_DIR || join(root, '.dashboard-data');
+const creativeImageRoot = join(creativeDataRoot, 'creatives');
+const creativeMetadataPath = join(creativeDataRoot, 'creatives.json');
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
 };
+
+function readCreativeMetadata() {
+  if (!existsSync(creativeMetadataPath)) return [];
+  try { return JSON.parse(readFileSync(creativeMetadataPath, 'utf8')); }
+  catch { return []; }
+}
+
+function saveCreativeMetadata(items) {
+  mkdirSync(creativeDataRoot, { recursive: true });
+  writeFileSync(creativeMetadataPath, JSON.stringify(items, null, 2), 'utf8');
+}
+
+function readJsonBody(request, maxBytes = 12 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    let rejected = false;
+    const chunks = [];
+    request.on('data', chunk => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        if (!rejected) reject(new Error('업로드 파일이 너무 큽니다.'));
+        rejected = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => {
+      if (rejected) return;
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      catch { reject(new Error('업로드 요청 형식이 올바르지 않습니다.')); }
+    });
+    request.on('error', reject);
+  });
+}
 
 const campaignSheet = {
   spreadsheetId: '1IP9rWvILocygHodSTiDxc5TDKB7LNnLJJNVJFTGlXN4',
@@ -611,25 +653,42 @@ async function getOverviewMetrics({ business, startDate, endDate }) {
       END AS business_unit,
       user_pseudo_id,
       (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      event_timestamp,
       event_name,
       ecommerce.purchase_revenue AS purchase_revenue
     FROM \`planar-method-169102.analytics_496808362.events_*\`
     WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date) AND FORMAT_DATE('%Y%m%d', @end_date)
-  ), ga_daily AS (
+  ), ga_sessions AS (
     SELECT
       metric_date,
-      COUNT(DISTINCT IF(ga_session_id IS NULL, NULL, CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING)))) AS sessions,
-      COUNT(DISTINCT user_pseudo_id) AS users,
+      business_unit,
+      user_pseudo_id,
+      ga_session_id,
+      SAFE_DIVIDE(MAX(event_timestamp) - MIN(event_timestamp), 1000000) AS session_duration,
+      LOGICAL_OR(event_name IN ('first_visit', 'first_open')) AS is_new_user,
+      COUNTIF(event_name = 'add_to_cart') AS carts,
       COUNTIF(event_name = 'purchase') AS purchases,
       COALESCE(SUM(IF(event_name = 'purchase', purchase_revenue, 0)), 0) AS revenue
     FROM ga_events
     WHERE business_unit IS NOT NULL AND (@business = 'all' OR business_unit = @business)
+    GROUP BY metric_date, business_unit, user_pseudo_id, ga_session_id
+  ), ga_daily AS (
+    SELECT
+      metric_date,
+      COUNTIF(ga_session_id IS NOT NULL) AS sessions,
+      COUNT(DISTINCT user_pseudo_id) AS users,
+      COUNT(DISTINCT IF(is_new_user, user_pseudo_id, NULL)) AS new_users,
+      AVG(IF(ga_session_id IS NULL, NULL, session_duration)) AS avg_duration,
+      SUM(carts) AS carts,
+      SUM(purchases) AS purchases,
+      SUM(revenue) AS revenue
+    FROM ga_sessions
     GROUP BY metric_date
   ), dates AS (
     SELECT metric_date FROM UNNEST(GENERATE_DATE_ARRAY(@start_date, @end_date)) AS metric_date
   )
   SELECT CAST(dates.metric_date AS STRING), COALESCE(impressions, 0), COALESCE(clicks, 0), COALESCE(views, 0), COALESCE(cost, 0),
-    COALESCE(purchases, 0), COALESCE(revenue, 0), COALESCE(sessions, 0), COALESCE(users, 0)
+    COALESCE(purchases, 0), COALESCE(revenue, 0), COALESCE(sessions, 0), COALESCE(users, 0), COALESCE(carts, 0), COALESCE(avg_duration, 0), COALESCE(new_users, 0)
   FROM dates LEFT JOIN media_daily USING (metric_date) LEFT JOIN ga_daily USING (metric_date)
   ORDER BY metric_date`;
   const channelQuery = `SELECT COALESCE(media, '미분류') AS media, COALESCE(SUM(cost), 0) AS cost
@@ -641,18 +700,21 @@ async function getOverviewMetrics({ business, startDate, endDate }) {
   const trend = dailyRows.map(row => ({
     date: row.f[0]?.v,
     impressions: Number(row.f[1]?.v ?? 0), clicks: Number(row.f[2]?.v ?? 0), views: Number(row.f[3]?.v ?? 0), cost: Number(row.f[4]?.v ?? 0),
-    conversions: Number(row.f[5]?.v ?? 0), revenue: Number(row.f[6]?.v ?? 0), sessions: Number(row.f[7]?.v ?? 0), users: Number(row.f[8]?.v ?? 0),
+    conversions: Number(row.f[5]?.v ?? 0), revenue: Number(row.f[6]?.v ?? 0), sessions: Number(row.f[7]?.v ?? 0), users: Number(row.f[8]?.v ?? 0), carts: Number(row.f[9]?.v ?? 0), avgDuration: Number(row.f[10]?.v ?? 0), newUsers: Number(row.f[11]?.v ?? 0),
   }));
   const totals = trend.reduce((sum, row) => {
-    ['impressions', 'clicks', 'views', 'cost', 'conversions', 'revenue', 'sessions', 'users'].forEach(key => { sum[key] += row[key]; });
+    ['impressions', 'clicks', 'views', 'cost', 'conversions', 'revenue', 'sessions', 'users', 'carts', 'newUsers'].forEach(key => { sum[key] += row[key]; });
     return sum;
-  }, { impressions: 0, clicks: 0, views: 0, cost: 0, conversions: 0, revenue: 0, sessions: 0, users: 0 });
+  }, { impressions: 0, clicks: 0, views: 0, cost: 0, conversions: 0, revenue: 0, sessions: 0, users: 0, carts: 0, newUsers: 0 });
   const metrics = {
     ...totals,
     cpm: totals.impressions ? totals.cost / totals.impressions * 1000 : 0,
     ctr: totals.impressions ? totals.clicks / totals.impressions * 100 : 0,
     cpv: totals.views ? totals.cost / totals.views : 0,
     purchaseRate: totals.clicks ? totals.conversions / totals.clicks * 100 : 0,
+    cartRate: totals.sessions ? totals.carts / totals.sessions * 100 : 0,
+    avgDuration: totals.sessions ? trend.reduce((sum, row) => sum + row.avgDuration * row.sessions, 0) / totals.sessions : 0,
+    newUserShare: totals.users ? totals.newUsers / totals.users * 100 : 0,
     cpo: totals.conversions ? totals.cost / totals.conversions : 0,
     roas: totals.cost ? totals.revenue / totals.cost * 100 : 0,
   };
@@ -660,8 +722,264 @@ async function getOverviewMetrics({ business, startDate, endDate }) {
   return { metrics, trend, channels };
 }
 
+async function getMediaProductReport({ business, startDate, endDate }) {
+  const accessToken = await getGoogleAccessToken('https://www.googleapis.com/auth/bigquery.readonly');
+  const detailQuery = `SELECT
+      IF(STRPOS(UPPER(COALESCE(campaign_name, '')), 'MKT') > 0, 'MKT', 'PERF') AS business,
+      COALESCE(media, '미분류') AS media,
+      COALESCE(NULLIF(campaign_type, ''), '기타') AS product,
+      COALESCE(SUM(source.cost), 0) AS cost,
+      COALESCE(SUM(source.impression), 0) AS impressions,
+      COALESCE(SUM(source.click), 0) AS clicks,
+      COALESCE(SUM(CASE WHEN source.media = '메타' THEN source.video_3s_view ELSE source.view_count END), 0) AS views
+    FROM \`planar-method-169102.61217_blackyak.blackyak_media_data_view\` AS source
+    WHERE datestamp BETWEEN @start_date AND @end_date
+      AND (@business = 'all' OR IF(STRPOS(UPPER(COALESCE(campaign_name, '')), 'MKT') > 0, 'MKT', 'PERF') = @business)
+    GROUP BY business, media, product
+    HAVING SUM(COALESCE(source.impression, 0)) > 0 OR SUM(COALESCE(source.click, 0)) > 0 OR SUM(COALESCE(source.cost, 0)) > 0
+    ORDER BY cost DESC`;
+  const dailyQuery = `SELECT
+      CAST(datestamp AS STRING) AS metric_date,
+      COALESCE(media, '미분류') AS media,
+      COALESCE(SUM(source.cost), 0) AS cost,
+      COALESCE(SUM(source.impression), 0) AS impressions,
+      COALESCE(SUM(source.click), 0) AS clicks,
+      COALESCE(SUM(CASE WHEN source.media = '메타' THEN source.video_3s_view ELSE source.view_count END), 0) AS views
+    FROM \`planar-method-169102.61217_blackyak.blackyak_media_data_view\` AS source
+    WHERE datestamp BETWEEN @start_date AND @end_date
+      AND (@business = 'all' OR IF(STRPOS(UPPER(COALESCE(campaign_name, '')), 'MKT') > 0, 'MKT', 'PERF') = @business)
+    GROUP BY metric_date, media
+    ORDER BY metric_date, media`;
+  const gaDailyQuery = `WITH ga_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', _TABLE_SUFFIX) AS metric_date,
+      LOWER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.source, '')) AS session_source,
+      COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '') AS campaign_name,
+      event_name,
+      ecommerce.purchase_revenue AS purchase_revenue
+    FROM \`planar-method-169102.analytics_496808362.events_*\`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date) AND FORMAT_DATE('%Y%m%d', @end_date)
+  ), classified AS (
+    SELECT
+      metric_date,
+      CASE
+        WHEN STRPOS(session_source, 'navergfa') > 0 THEN '네이버 GFA'
+        WHEN STRPOS(session_source, 'naver') > 0 THEN '네이버 SA'
+        WHEN STRPOS(session_source, 'google') > 0 OR STRPOS(session_source, 'youtube') > 0 THEN '구글'
+        WHEN STRPOS(session_source, 'meta') > 0 THEN '메타'
+        WHEN STRPOS(session_source, 'criteo') > 0 THEN '크리테오'
+        ELSE NULL
+      END AS media,
+      IF(STRPOS(UPPER(campaign_name), 'MKT') > 0, 'MKT', 'PERF') AS business,
+      event_name,
+      purchase_revenue
+    FROM ga_events
+  )
+  SELECT
+    CAST(metric_date AS STRING) AS metric_date,
+    media,
+    COUNTIF(event_name = 'purchase') AS purchases,
+    COALESCE(SUM(IF(event_name = 'purchase', purchase_revenue, 0)), 0) AS revenue
+  FROM classified
+  WHERE media IS NOT NULL AND (@business = 'all' OR business = @business)
+  GROUP BY metric_date, media
+  ORDER BY metric_date, media`;
+  const queryParameters = [
+    { name: 'business', parameterType: { type: 'STRING' }, parameterValue: { value: business } },
+    { name: 'start_date', parameterType: { type: 'DATE' }, parameterValue: { value: startDate } },
+    { name: 'end_date', parameterType: { type: 'DATE' }, parameterValue: { value: endDate } },
+  ];
+  const execute = async query => {
+    const queryResponse = await fetch('https://bigquery.googleapis.com/bigquery/v2/projects/planar-method-169102/queries', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, useLegacySql: false, location: 'asia-northeast3', timeoutMs: 30000, parameterMode: 'NAMED', queryParameters }),
+    });
+    const result = await queryResponse.json();
+    if (!queryResponse.ok || result.errors?.length) throw new Error(`BigQuery 조회 실패 (${queryResponse.status}): ${result.errors?.[0]?.message ?? result.error?.message ?? '알 수 없는 오류'}`);
+    if (!result.jobComplete) throw new Error('BigQuery 조회 시간이 초과되었습니다.');
+    return result.rows ?? [];
+  };
+  const [detailRows, dailyRows, gaDailyRows] = await Promise.all([execute(detailQuery), execute(dailyQuery), execute(gaDailyQuery)]);
+  const rows = detailRows.map(row => ({
+    business: row.f[0]?.v ?? 'PERF', media: row.f[1]?.v ?? '미분류', product: row.f[2]?.v ?? '기타',
+    cost: Number(row.f[3]?.v ?? 0), impressions: Number(row.f[4]?.v ?? 0), clicks: Number(row.f[5]?.v ?? 0), views: Number(row.f[6]?.v ?? 0),
+  }));
+  const daily = dailyRows.map(row => ({
+    date: row.f[0]?.v, media: row.f[1]?.v ?? '미분류', cost: Number(row.f[2]?.v ?? 0), impressions: Number(row.f[3]?.v ?? 0), clicks: Number(row.f[4]?.v ?? 0), views: Number(row.f[5]?.v ?? 0),
+  }));
+  const gaDaily = gaDailyRows.map(row => ({
+    date: row.f[0]?.v, media: row.f[1]?.v, purchases: Number(row.f[2]?.v ?? 0), revenue: Number(row.f[3]?.v ?? 0),
+  }));
+  return { rows, daily, gaDaily };
+}
+
+async function getGaPurchaseCampaigns({ business, startDate, endDate }) {
+  const accessToken = await getGoogleAccessToken('https://www.googleapis.com/auth/bigquery.readonly');
+  const query = `WITH purchase_events AS (
+    SELECT
+      COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '') AS campaign_name,
+      IF(STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), 'MKT') > 0, 'MKT', 'PERF') AS business,
+      ecommerce.purchase_revenue AS purchase_revenue
+    FROM \`planar-method-169102.analytics_496808362.events_*\`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date) AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND event_name = 'purchase'
+  )
+  SELECT campaign_name, COUNT(*) AS purchases, COALESCE(SUM(purchase_revenue), 0) AS revenue
+  FROM purchase_events
+  WHERE campaign_name != ''
+    AND LOWER(TRIM(campaign_name)) NOT IN (
+      '(direct)', 'direct', '(referral)', 'referral', '(not set)', 'not set',
+      '(organic)', 'organic', '(none)', 'none', '(unassigned)', 'unassigned'
+    )
+    AND (@business = 'all' OR business = @business)
+  GROUP BY campaign_name
+  ORDER BY purchases DESC, revenue DESC
+  LIMIT 10`;
+  const queryResponse = await fetch('https://bigquery.googleapis.com/bigquery/v2/projects/planar-method-169102/queries', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query, useLegacySql: false, location: 'asia-northeast3', timeoutMs: 30000, parameterMode: 'NAMED',
+      queryParameters: [
+        { name: 'business', parameterType: { type: 'STRING' }, parameterValue: { value: business } },
+        { name: 'start_date', parameterType: { type: 'DATE' }, parameterValue: { value: startDate } },
+        { name: 'end_date', parameterType: { type: 'DATE' }, parameterValue: { value: endDate } },
+      ],
+    }),
+  });
+  const result = await queryResponse.json();
+  if (!queryResponse.ok || result.errors?.length) throw new Error(`BigQuery 조회 실패 (${queryResponse.status}): ${result.errors?.[0]?.message ?? result.error?.message ?? '알 수 없는 오류'}`);
+  if (!result.jobComplete) throw new Error('BigQuery 조회 시간이 초과되었습니다.');
+  return (result.rows ?? []).map(row => ({ campaign: row.f[0]?.v, purchases: Number(row.f[1]?.v ?? 0), revenue: Number(row.f[2]?.v ?? 0) }));
+}
+
 const server = createServer(async (request, response) => {
   const pathname = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname);
+  if (pathname === '/api/campaign-creatives') {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    if (request.method === 'GET') {
+      const campaign = url.searchParams.get('campaign')?.trim();
+      if (!campaign || campaign === 'all') {
+        response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: '캠페인을 먼저 선택해 주세요.' }));
+        return;
+      }
+      const creatives = readCreativeMetadata().filter(item => item.campaign === campaign);
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ campaign, creatives }));
+      return;
+    }
+    if (request.method === 'PATCH') {
+      try {
+        const body = await readJsonBody(request, 64 * 1024);
+        const id = String(body.id ?? '').trim();
+        const campaign = String(body.campaign ?? '').trim();
+        const media = String(body.media ?? '').trim();
+        const label = String(body.label ?? '').trim();
+        const creativeType = String(body.creativeType ?? '').trim();
+        if (!/^[0-9a-f-]{36}$/.test(id) || !campaign || campaign === 'all') throw new Error('수정할 소재 정보가 올바르지 않습니다.');
+        if (!media || !label || !['영상', '배너'].includes(creativeType)) throw new Error('매체, 소재 라벨, 소재 유형을 모두 입력해 주세요.');
+        if (media.length > 80 || label.length > 120) throw new Error('입력한 텍스트가 너무 깁니다.');
+        const filters = await getCampaignFilters();
+        if (!getAvailableMedia(filters.filterRows, campaign, 'all').includes(media)) throw new Error('선택한 캠페인에 포함된 매체만 지정할 수 있습니다.');
+        const creatives = readCreativeMetadata();
+        const index = creatives.findIndex(item => item.id === id && item.campaign === campaign);
+        if (index < 0) {
+          response.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: '수정할 소재를 찾지 못했습니다.' }));
+          return;
+        }
+        creatives[index] = { ...creatives[index], media, label, creativeType, updatedAt: new Date().toISOString() };
+        saveCreativeMetadata(creatives);
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify({ creative: creatives[index] }));
+      } catch (error) {
+        response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+    if (request.method === 'DELETE') {
+      const campaign = url.searchParams.get('campaign')?.trim();
+      const id = url.searchParams.get('id')?.trim();
+      if (!campaign || campaign === 'all' || !/^[0-9a-f-]{36}$/.test(id ?? '')) {
+        response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: '삭제할 소재 정보가 올바르지 않습니다.' }));
+        return;
+      }
+      try {
+        const creatives = readCreativeMetadata();
+        const creative = creatives.find(item => item.id === id && item.campaign === campaign);
+        if (!creative) {
+          response.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: '삭제할 소재를 찾지 못했습니다.' }));
+          return;
+        }
+        saveCreativeMetadata(creatives.filter(item => item.id !== id));
+        const filename = creative.imageUrl.split('/').pop();
+        if (/^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/.test(filename ?? '')) {
+          const imagePath = join(creativeImageRoot, filename);
+          if (existsSync(imagePath)) unlinkSync(imagePath);
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify({ deletedId: id }));
+      } catch (error) {
+        response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify({ error: `소재 삭제 중 오류가 발생했습니다. ${error.message}` }));
+      }
+      return;
+    }
+    if (request.method === 'POST') {
+      try {
+        const body = await readJsonBody(request);
+        const campaign = String(body.campaign ?? '').trim();
+        const media = String(body.media ?? '').trim();
+        const label = String(body.label ?? '').trim();
+        const creativeType = String(body.creativeType ?? '').trim();
+        const imageData = String(body.imageData ?? '');
+        if (!campaign || campaign === 'all') throw new Error('캠페인을 먼저 선택해 주세요.');
+        if (!media || !label || !['영상', '배너'].includes(creativeType)) throw new Error('매체, 소재 라벨, 소재 유형을 모두 입력해 주세요.');
+        if (campaign.length > 200 || media.length > 80 || label.length > 120) throw new Error('입력한 텍스트가 너무 깁니다.');
+        const filters = await getCampaignFilters();
+        if (!getAvailableMedia(filters.filterRows, campaign, 'all').includes(media)) throw new Error('선택한 캠페인에 포함된 매체만 등록할 수 있습니다.');
+        const match = imageData.match(/^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/=]+)$/);
+        if (!match) throw new Error('PNG, JPG, WEBP, GIF 이미지만 업로드할 수 있습니다.');
+        const image = Buffer.from(match[2], 'base64');
+        if (!image.length || image.length > 8 * 1024 * 1024) throw new Error('이미지는 최대 8MB까지 업로드할 수 있습니다.');
+        const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
+        const id = randomUUID();
+        const filename = `${id}.${extension}`;
+        mkdirSync(creativeImageRoot, { recursive: true });
+        writeFileSync(join(creativeImageRoot, filename), image);
+        const creative = { id, campaign, media, label, creativeType, imageUrl: `/creative-assets/${filename}`, uploadedAt: new Date().toISOString() };
+        const creatives = readCreativeMetadata();
+        creatives.push(creative);
+        saveCreativeMetadata(creatives);
+        response.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify({ creative }));
+      } catch (error) {
+        response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+    response.writeHead(405, { Allow: 'GET, POST, PATCH, DELETE' });
+    response.end();
+    return;
+  }
+  if (pathname.startsWith('/creative-assets/')) {
+    const filename = pathname.slice('/creative-assets/'.length);
+    const filePath = normalize(join(creativeImageRoot, filename));
+    if (!/^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/.test(filename) || !filePath.startsWith(creativeImageRoot) || !existsSync(filePath) || !statSync(filePath).isFile()) {
+      response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      response.end('Not found');
+      return;
+    }
+    response.writeHead(200, { 'Content-Type': contentTypes[extname(filePath)] ?? 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
+    createReadStream(filePath).pipe(response);
+    return;
+  }
   if (pathname === '/api/overview-metrics') {
     const url = new URL(request.url, `http://${request.headers.host}`);
     const requestedBusiness = url.searchParams.get('business') || 'all';
@@ -680,6 +998,52 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify({ business, startDate, endDate, ...result }));
     } catch (error) {
       console.error(`Overview metrics error: ${error.message}`);
+      response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ error: error.message }));
+    }
+    return;
+  }
+  if (pathname === '/api/media-product-report') {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const requestedBusiness = url.searchParams.get('business') || 'all';
+    const business = ['all', 'MKT', 'PERF'].includes(requestedBusiness) ? requestedBusiness : 'all';
+    const startDate = url.searchParams.get('start');
+    const endDate = url.searchParams.get('end');
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '');
+    if (!validDate(startDate) || !validDate(endDate)) {
+      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: '조회 기간이 올바르지 않습니다.' }));
+      return;
+    }
+    try {
+      const result = await getMediaProductReport({ business, startDate, endDate });
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ business, startDate, endDate, ...result }));
+    } catch (error) {
+      console.error(`Media product report error: ${error.message}`);
+      response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ error: error.message }));
+    }
+    return;
+  }
+  if (pathname === '/api/ga-purchase-campaigns') {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const requestedBusiness = url.searchParams.get('business') || 'all';
+    const business = ['all', 'MKT', 'PERF'].includes(requestedBusiness) ? requestedBusiness : 'all';
+    const startDate = url.searchParams.get('start');
+    const endDate = url.searchParams.get('end');
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '');
+    if (!validDate(startDate) || !validDate(endDate)) {
+      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: '조회 기간이 올바르지 않습니다.' }));
+      return;
+    }
+    try {
+      const campaigns = await getGaPurchaseCampaigns({ business, startDate, endDate });
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ business, startDate, endDate, campaigns }));
+    } catch (error) {
+      console.error(`GA purchase campaigns error: ${error.message}`);
       response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify({ error: error.message }));
     }
