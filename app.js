@@ -1,5 +1,6 @@
 import { calculateMetrics } from './metrics.js';
 import { getAvailableBusinesses, getAvailableMedia } from './campaign-filters.js';
+import { getComparisonDateRange } from './date-ranges.js';
 
 const datasets = {
   30: [
@@ -26,6 +27,14 @@ const targetRoas = 300;
 let activeChannel = 'all';
 let activeOverviewBusiness = 'all';
 let overviewMetricRequestId = 0;
+let activeMediaProductBusiness = 'all';
+let activeMediaProductMedia = 'all';
+let mediaProductRequestId = 0;
+let activeGaBusiness = 'all';
+let gaReportRequestId = 0;
+let selectedGaTrendMetrics = ['sessions', 'revenue'];
+let creativeLabelHistory = [];
+let currentCampaignCreatives = [];
 
 const campaignRows = [
   { campaign: 'SUMMIT 2026', key: 'summit', business: 'outdoor', businessLabel: '아웃도어', channel: 'Google Ads', status: '운영중', cost: 8600000, impressions: 236000, views: 118000, clicks: 7840, conversions: 322, revenue: 28400000 },
@@ -34,6 +43,14 @@ const campaignRows = [
   { campaign: 'SEASON OFF', key: 'season', business: 'outdoor', businessLabel: '아웃도어', channel: 'Meta', status: '종료', cost: 4200000, impressions: 173000, views: 88700, clicks: 4120, conversions: 156, revenue: 12700000 },
 ];
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+const readJsonResponse = async response => {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (contentType.includes('application/json')) return response.json();
+  const message = [404, 405].includes(response.status)
+    ? '새 데이터 API를 적용하려면 Launcher 미리보기를 다시 실행해주세요.'
+    : `데이터 응답 형식이 올바르지 않습니다. (${response.status})`;
+  return { error: message };
+};
 const campaignKpiDefinitions = [
   { key: 'impressions', label: '노출수', goal: 92, yoy: 108 }, { key: 'clicks', label: '클릭수', goal: 86, yoy: 104 }, { key: 'views', label: '조회수', goal: 78, yoy: 112 },
   { key: 'cost', label: '비용', goal: 81, yoy: 96 }, { key: 'conversions', label: '구매(GA)', goal: 88, yoy: 109 }, { key: 'revenue', label: '매출액(GA)', goal: 95, yoy: 118 }, { key: 'sessions', label: '세션수', comparison: false },
@@ -145,21 +162,21 @@ function renderMediaOverview(rows, totalCost) {
 function renderDailyTrend(rows) {
   const labels = rows.map(row => `${Number(row.date.slice(5, 7))}/${Number(row.date.slice(8, 10))}`);
   const costs = rows.map(row => row.cost);
-  const ctrs = rows.map(row => row.impressions ? row.clicks / row.impressions * 100 : 0);
+  const revenues = rows.map(row => row.revenue);
   const width = 850, height = 250, left = 34, bottom = 34, top = 22;
   const maxCost = Math.max(...costs, 1) * 1.15;
-  const maxCtr = Math.max(...ctrs, 1) * 1.2;
+  const maxRevenue = Math.max(...revenues, 1) * 1.2;
   if (!rows.length) {
     document.querySelector('#daily-trend').innerHTML = '<p class="empty-state">선택한 기간의 데이터가 없습니다.</p>';
     return;
   }
   const step = (width - left * 2) / rows.length;
-  const line = ctrs.map((value, index) => `${index ? 'L' : 'M'} ${left + step * index + step / 2} ${top + (height - top - bottom) * (1 - value / maxCtr)}`).join(' ');
-  document.querySelector('#daily-trend').innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="광고비 막대와 CTR 선 그래프">
+  const line = revenues.map((value, index) => `${index ? 'L' : 'M'} ${left + step * index + step / 2} ${top + (height - top - bottom) * (1 - value / maxRevenue)}`).join(' ');
+  document.querySelector('#daily-trend').innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="광고비 막대와 매출 선 그래프">
     ${[0,1,2,3].map(i => `<line class="daily-grid" x1="${left}" y1="${top + i * 55}" x2="${width-left}" y2="${top + i * 55}"/>`).join('')}
     ${costs.map((value, index) => `<rect class="daily-bar" x="${left + step * index + step * .2}" y="${top + (height-top-bottom)*(1-value/maxCost)}" width="${step*.6}" height="${(height-top-bottom)*value/maxCost}" rx="4"/>`).join('')}
     <path class="daily-line" d="${line}"/>
-    ${ctrs.map((value, index) => `<circle class="daily-point" cx="${left + step * index + step/2}" cy="${top+(height-top-bottom)*(1-value/maxCtr)}" r="3"/>`).join('')}
+    ${revenues.map((value, index) => `<circle class="daily-point" cx="${left + step * index + step/2}" cy="${top+(height-top-bottom)*(1-value/maxRevenue)}" r="3"><title>${rows[index].date} · 매출 ${won.format(value)}</title></circle>`).join('')}
     ${labels.map((label,index) => `<text class="daily-label" x="${left+step*index+step/2}" y="${height-8}" text-anchor="middle">${label}</text>`).join('')}
   </svg>`;
 }
@@ -793,11 +810,20 @@ function toggleTrendMetric(key) {
   renderCampaignReport();
 }
 
+function updatePeriodStackVisibility() {
+  const stack = document.querySelector('.overview-period-stack');
+  stack.hidden = [...stack.querySelectorAll('.period-control')].every(control => control.hidden);
+}
+
 function showReportView(hash = window.location.hash) {
   const campaignMode = hash === '#campaign-report';
+  const mediaProductMode = hash === '#media-product-report';
+  const gaReportMode = hash === '#ga-report';
   const mediaTabActive = document.querySelector('[data-report-tab="media"]')?.classList.contains('active');
   const mixTabActive = document.querySelector('[data-report-tab="mix"]')?.classList.contains('active');
-  document.querySelector('#overview-view').hidden = campaignMode;
+  document.querySelector('#overview-view').hidden = campaignMode || mediaProductMode || gaReportMode;
+  document.querySelector('#media-product-report').hidden = !mediaProductMode;
+  document.querySelector('#ga-report').hidden = !gaReportMode;
   document.querySelector('#campaign-report').hidden = !campaignMode;
   const pageHeader = document.querySelector('.page-header');
   pageHeader.querySelector(':scope > div:first-child').hidden = true;
@@ -806,8 +832,11 @@ function showReportView(hash = window.location.hash) {
   document.querySelector('#comparison-period-control').hidden = campaignMode;
   document.querySelector('#campaign-fixed-period').hidden = !campaignMode || !mediaTabActive;
   document.querySelector('#campaign-unavailable-period').hidden = !campaignMode || !mixTabActive;
+  updatePeriodStackVisibility();
   pageHeader.classList.toggle('campaign-period-header', campaignMode);
-  document.querySelectorAll('.sidebar nav a').forEach(link => link.classList.toggle('active', campaignMode ? link.hash === '#campaign-report' : link.hash === (hash || '#overview')));
+  document.querySelectorAll('.sidebar nav a').forEach(link => link.classList.toggle('active', campaignMode ? link.hash === '#campaign-report' : mediaProductMode ? link.hash === '#media-product-report' : gaReportMode ? link.hash === '#ga-report' : link.hash === (hash || '#overview')));
+  if (mediaProductMode) renderMediaProductReport();
+  if (gaReportMode) renderGaReport();
   if (campaignMode) {
     renderCampaignReport();
     window.requestAnimationFrame(updateCampaignStickyOffsets);
@@ -824,17 +853,20 @@ function updateCampaignStickyOffsets() {
 
 function showCampaignTab(tab, { load = true, persist = true } = {}) {
   if (!['summary', 'media', 'creative', 'mix'].includes(tab)) tab = 'summary';
-  const labels = { creative: ['03', '소재'], mix: ['04', '미디어믹스'] };
+  const campaignMode = window.location.hash === '#campaign-report';
   const summary = tab === 'summary';
   const media = tab === 'media';
+  const creative = tab === 'creative';
   const mix = tab === 'mix';
   document.querySelector('#campaign-summary-tab').hidden = !summary;
   document.querySelector('#campaign-media-tab').hidden = !media;
+  document.querySelector('#campaign-creative-tab').hidden = !creative;
   document.querySelector('#campaign-mix-tab').hidden = !mix;
-  document.querySelector('#campaign-tab-placeholder').hidden = summary || media || mix;
-  document.querySelector('#primary-period-control').hidden = media || mix;
-  document.querySelector('#campaign-fixed-period').hidden = !media;
-  document.querySelector('#campaign-unavailable-period').hidden = !mix;
+  document.querySelector('#primary-period-control').hidden = campaignMode && (media || mix);
+  document.querySelector('#comparison-period-control').hidden = campaignMode;
+  document.querySelector('#campaign-fixed-period').hidden = !campaignMode || !media;
+  document.querySelector('#campaign-unavailable-period').hidden = !campaignMode || !mix;
+  updatePeriodStackVisibility();
   document.querySelectorAll('[data-report-tab]').forEach(button => {
     const active = button.dataset.reportTab === tab;
     button.classList.toggle('active', active);
@@ -844,16 +876,257 @@ function showCampaignTab(tab, { load = true, persist = true } = {}) {
   document.querySelectorAll('.campaign-tab-panel').forEach(panel => {
     panel.dataset.campaign = selectedCampaign;
   });
-  if (!summary && !media) {
-    document.querySelector('#campaign-tab-index').textContent = labels[tab][0];
-    document.querySelector('#campaign-tab-title').textContent = labels[tab][1];
-  }
   if (media && load) {
     applyMediaProgressColors();
     loadCampaignMediaTable();
   }
+  if (creative && load) loadCampaignCreatives();
   if (mix && load) loadCampaignMediaMix();
   if (persist) saveCampaignReportState({ tab });
+}
+
+function updateCreativeUploadState() {
+  const campaign = document.querySelector('#campaign-select').value;
+  const mediaSelect = document.querySelector('#creative-media');
+  const previousMedia = mediaSelect.value;
+  const mediaOptions = campaign && campaign !== 'all' ? getAvailableMedia(campaignFilterRows, campaign, 'all') : [];
+  mediaSelect.replaceChildren();
+  if (mediaOptions.length) {
+    mediaOptions.forEach(media => {
+      const option = document.createElement('option');
+      option.value = media;
+      option.textContent = media;
+      mediaSelect.append(option);
+    });
+    mediaSelect.value = mediaOptions.includes(previousMedia) ? previousMedia : mediaOptions[0];
+  } else {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = campaign && campaign !== 'all' ? '등록 가능한 매체가 없습니다' : '캠페인을 먼저 선택해 주세요';
+    mediaSelect.append(option);
+  }
+  const enabled = Boolean(campaign && campaign !== 'all' && mediaOptions.length);
+  const form = document.querySelector('#creative-upload-form');
+  const guide = document.querySelector('#creative-campaign-guide');
+  document.querySelector('#creative-upload-open').disabled = !enabled;
+  form.querySelectorAll('input, select, button').forEach(control => { control.disabled = !enabled; });
+  guide.textContent = enabled ? `‘${campaign}’ 캠페인의 실제 운영 매체 중 선택해 등록합니다.` : campaign && campaign !== 'all' ? '선택한 캠페인에 등록 가능한 매체가 없습니다.' : '상단에서 캠페인을 선택해야 업로드할 수 있습니다.';
+  form.classList.toggle('disabled', !enabled);
+  return enabled;
+}
+
+function renderCreativeLabelSuggestions(query = '') {
+  const suggestions = document.querySelector('#creative-label-suggestions');
+  const needle = query.trim().toLocaleLowerCase('ko-KR');
+  const labels = creativeLabelHistory.filter(label => !needle || label.toLocaleLowerCase('ko-KR').includes(needle));
+  suggestions.innerHTML = labels.length
+    ? labels.map(label => `<button type="button" role="option" data-creative-label="${escapeHtml(label)}">${escapeHtml(label)}</button>`).join('')
+    : '<p>등록 이력이 있는 라벨이 없습니다.</p>';
+  suggestions.hidden = false;
+}
+
+async function loadCampaignCreatives() {
+  const campaign = document.querySelector('#campaign-select').value;
+  const library = document.querySelector('#creative-library');
+  const count = document.querySelector('#creative-count');
+  document.querySelector('#creative-upload-message').textContent = '';
+  if (!updateCreativeUploadState()) {
+    creativeLabelHistory = [];
+    currentCampaignCreatives = [];
+    count.textContent = '0개 소재';
+    library.innerHTML = '<p class="empty-state">상단 필터에서 캠페인을 선택해 주세요.</p>';
+    return;
+  }
+  creativeLabelHistory = [];
+  library.innerHTML = '<p class="empty-state">등록 소재를 불러오는 중…</p>';
+  try {
+    const response = await fetch(`/api/campaign-creatives?${new URLSearchParams({ campaign })}`, { headers: { Accept: 'application/json' } });
+    const result = await readJsonResponse(response);
+    if (!response.ok) throw new Error(result.error || '등록 소재를 불러오지 못했습니다.');
+    if (document.querySelector('#campaign-select').value !== campaign) return;
+    const creatives = result.creatives ?? [];
+    currentCampaignCreatives = creatives;
+    creativeLabelHistory = [...new Set(creatives.map(creative => creative.label).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'ko-KR'));
+    const groupMap = new Map();
+    creatives.forEach(creative => {
+      const creativeType = creative.creativeType || '미분류';
+      const key = `${creative.media}\u0000${creative.label}\u0000${creativeType}`;
+      if (!groupMap.has(key)) groupMap.set(key, { media: creative.media, label: creative.label, creativeType, items: [] });
+      groupMap.get(key).items.push(creative);
+    });
+    const groups = [...groupMap.values()].sort((left, right) => left.media.localeCompare(right.media, 'ko-KR') || left.label.localeCompare(right.label, 'ko-KR') || left.creativeType.localeCompare(right.creativeType, 'ko-KR'));
+    const mediaGroups = [...new Set(groups.map(group => group.media))];
+    count.textContent = `${groups.length}개 소재 그룹 · ${creatives.length}개 이미지`;
+    library.innerHTML = groups.length ? mediaGroups.map(media => {
+      const mediaItems = groups.filter(group => group.media === media);
+      const imageCount = mediaItems.reduce((sum, group) => sum + group.items.length, 0);
+      const cards = mediaItems.map(group => {
+        const cover = group.items[0];
+        return `<button type="button" class="creative-card creative-label-card" data-creative-media="${escapeHtml(group.media)}" data-creative-label="${escapeHtml(group.label)}" data-creative-type="${escapeHtml(group.creativeType)}"><div class="creative-image"><img src="${escapeHtml(cover.imageUrl)}" alt="${escapeHtml(group.creativeType)} ${escapeHtml(group.label)}" loading="lazy"><b>${group.items.length}장</b></div><div class="creative-card-body"><h3>${escapeHtml(group.creativeType)} ${escapeHtml(group.label)}</h3><p>클릭하여 등록 소재 보기</p></div></button>`;
+      }).join('');
+      return `<section class="creative-media-group"><header><h3>${escapeHtml(media)}</h3><span>${mediaItems.length}개 그룹 · ${imageCount}개 이미지</span></header><div class="creative-media-grid">${cards}</div></section>`;
+    }).join('') : '<p class="empty-state">이 캠페인에 등록된 소재가 없습니다.</p>';
+  } catch (error) {
+    currentCampaignCreatives = [];
+    count.textContent = '조회 실패';
+    library.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderCreativeGallery(media, label, creativeType) {
+  const items = currentCampaignCreatives.filter(creative => creative.media === media && creative.label === label && (creative.creativeType || '미분류') === creativeType);
+  document.querySelector('#creative-gallery-title').textContent = `${creativeType} ${label}`;
+  document.querySelector('#creative-gallery-subtitle').textContent = `${media} · ${items.length}개 이미지 · 원하는 소재를 개별 삭제할 수 있습니다.`;
+  document.querySelector('#creative-gallery-message').textContent = '';
+  document.querySelector('#creative-gallery').innerHTML = items.map(creative => `<article class="creative-gallery-card" role="button" tabindex="0" data-edit-creative="${escapeHtml(creative.id)}" aria-label="${escapeHtml(creative.label)} 소재 정보 수정"><div><img src="${escapeHtml(creative.imageUrl)}" alt="${escapeHtml(creative.label)}" loading="lazy"></div><footer><span>${escapeHtml(creative.media)} · ${escapeHtml(creative.creativeType || '미분류')}</span><small>클릭하여 수정 · ${escapeHtml(new Date(creative.uploadedAt).toLocaleString('ko-KR'))}</small><button type="button" data-delete-creative="${escapeHtml(creative.id)}">삭제</button></footer></article>`).join('');
+  return items.length;
+}
+
+function openCreativeGallery(media, label, creativeType) {
+  if (!renderCreativeGallery(media, label, creativeType)) return;
+  const dialog = document.querySelector('#creative-gallery-dialog');
+  dialog.dataset.media = media;
+  dialog.dataset.label = label;
+  dialog.dataset.creativeType = creativeType;
+  dialog.showModal();
+}
+
+async function deleteCampaignCreative(id) {
+  const creative = currentCampaignCreatives.find(item => item.id === id);
+  if (!creative || !window.confirm(`‘${creative.label}’ 소재 이미지 1개를 삭제하시겠습니까?`)) return;
+  const message = document.querySelector('#creative-gallery-message');
+  const button = document.querySelector(`[data-delete-creative="${CSS.escape(id)}"]`);
+  if (button) { button.disabled = true; button.textContent = '삭제 중…'; }
+  message.textContent = '';
+  try {
+    const response = await fetch(`/api/campaign-creatives?${new URLSearchParams({ campaign: creative.campaign, id })}`, { method: 'DELETE', headers: { Accept: 'application/json' } });
+    const result = await readJsonResponse(response);
+    if (!response.ok) throw new Error(result.error || '소재를 삭제하지 못했습니다.');
+    const label = creative.label;
+    const creativeType = creative.creativeType || '미분류';
+    const media = creative.media;
+    await loadCampaignCreatives();
+    if (renderCreativeGallery(media, label, creativeType)) {
+      document.querySelector('#creative-gallery-dialog').dataset.media = media;
+      document.querySelector('#creative-gallery-dialog').dataset.label = label;
+      document.querySelector('#creative-gallery-dialog').dataset.creativeType = creativeType;
+    }
+    else document.querySelector('#creative-gallery-dialog').close();
+  } catch (error) {
+    message.textContent = error.message;
+    if (button) { button.disabled = false; button.textContent = '삭제'; }
+  }
+}
+
+function openCreativeEditor(id) {
+  const creative = currentCampaignCreatives.find(item => item.id === id);
+  if (!creative) return;
+  const mediaSelect = document.querySelector('#creative-edit-media');
+  const mediaOptions = getAvailableMedia(campaignFilterRows, creative.campaign, 'all');
+  mediaSelect.replaceChildren(...mediaOptions.map(media => {
+    const option = document.createElement('option');
+    option.value = media;
+    option.textContent = media;
+    return option;
+  }));
+  if (!mediaOptions.includes(creative.media)) {
+    const option = document.createElement('option');
+    option.value = creative.media;
+    option.textContent = creative.media;
+    mediaSelect.prepend(option);
+  }
+  mediaSelect.value = creative.media;
+  document.querySelector('#creative-edit-id').value = creative.id;
+  document.querySelector('#creative-edit-label').value = creative.label;
+  document.querySelector('#creative-edit-image').src = creative.imageUrl;
+  document.querySelectorAll('input[name="edit-creative-type"]').forEach(input => { input.checked = input.value === creative.creativeType; });
+  document.querySelector('#creative-edit-message').textContent = creative.creativeType ? '' : '기존 소재 유형이 미분류입니다. 영상 또는 배너를 선택해 주세요.';
+  document.querySelector('#creative-edit-dialog').showModal();
+}
+
+async function saveCreativeEdit(event) {
+  event.preventDefault();
+  const id = document.querySelector('#creative-edit-id').value;
+  const creative = currentCampaignCreatives.find(item => item.id === id);
+  if (!creative) return;
+  const media = document.querySelector('#creative-edit-media').value;
+  const label = document.querySelector('#creative-edit-label').value.trim();
+  const creativeType = document.querySelector('input[name="edit-creative-type"]:checked')?.value || '';
+  const message = document.querySelector('#creative-edit-message');
+  const submit = document.querySelector('#creative-edit-submit');
+  if (!media || !label || !creativeType) { message.textContent = '매체, 소재 라벨, 소재 유형을 모두 입력해 주세요.'; return; }
+  submit.disabled = true;
+  submit.textContent = '저장 중…';
+  message.textContent = '';
+  const previousMedia = creative.media;
+  const previousLabel = creative.label;
+  const previousType = creative.creativeType || '미분류';
+  try {
+    const response = await fetch('/api/campaign-creatives', { method: 'PATCH', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ id, campaign: creative.campaign, media, label, creativeType }) });
+    const result = await readJsonResponse(response);
+    if (!response.ok) throw new Error(result.error || '소재 정보를 수정하지 못했습니다.');
+    document.querySelector('#creative-edit-dialog').close();
+    await loadCampaignCreatives();
+    if (renderCreativeGallery(previousMedia, previousLabel, previousType)) {
+      document.querySelector('#creative-gallery-dialog').dataset.media = previousMedia;
+      document.querySelector('#creative-gallery-dialog').dataset.label = previousLabel;
+      document.querySelector('#creative-gallery-dialog').dataset.creativeType = previousType;
+    } else document.querySelector('#creative-gallery-dialog').close();
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+    submit.textContent = '수정 내용 저장';
+  }
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('이미지 파일을 읽지 못했습니다.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadCampaignCreative(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const campaign = document.querySelector('#campaign-select').value;
+  const media = document.querySelector('#creative-media').value.trim();
+  const label = document.querySelector('#creative-label').value.trim();
+  const creativeType = document.querySelector('input[name="creative-type"]:checked')?.value || '';
+  const files = [...document.querySelector('#creative-file').files];
+  const message = document.querySelector('#creative-upload-message');
+  const submit = document.querySelector('#creative-upload-submit');
+  if (!campaign || campaign === 'all') { message.textContent = '상단에서 캠페인을 먼저 선택해 주세요.'; return; }
+  if (!media || !label || !creativeType || !files.length) { message.textContent = '매체, 소재 라벨, 소재 유형, 이미지를 모두 입력해 주세요.'; return; }
+  const oversizedFile = files.find(file => file.size > 8 * 1024 * 1024);
+  if (oversizedFile) { message.textContent = `‘${oversizedFile.name}’ 파일이 8MB를 초과합니다.`; return; }
+  submit.disabled = true;
+  submit.textContent = `0/${files.length} 업로드 중…`;
+  message.textContent = '';
+  let uploadedCount = 0;
+  try {
+    for (const file of files) {
+      const imageData = await fileToDataUrl(file);
+      const response = await fetch('/api/campaign-creatives', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ campaign, media, label, creativeType, imageData }) });
+      const result = await readJsonResponse(response);
+      if (!response.ok) throw new Error(result.error || `‘${file.name}’ 파일을 업로드하지 못했습니다.`);
+      uploadedCount += 1;
+      submit.textContent = `${uploadedCount}/${files.length} 업로드 중…`;
+    }
+    form.reset();
+    document.querySelector('#creative-file-name').textContent = '이미지 선택 또는 Ctrl+V로 붙여넣기';
+    await loadCampaignCreatives();
+    document.querySelector('#creative-upload-dialog').close();
+  } catch (error) {
+    if (uploadedCount) await loadCampaignCreatives();
+    message.textContent = uploadedCount ? `${uploadedCount}개 등록 후 오류가 발생했습니다. ${error.message}` : error.message;
+  } finally {
+    submit.disabled = false;
+    submit.textContent = '소재 일괄 업로드';
+  }
 }
 
 async function loadCampaignMediaMix() {
@@ -1049,21 +1322,245 @@ function closeComparisonPeriodPicker() {
 
 function setComparisonDateRange(preset = selectedComparisonPreset) {
   if (!startDate.value || !endDate.value || preset === 'custom') return;
-  const currentStart = new Date(`${startDate.value}T00:00:00`);
-  const currentEnd = new Date(`${endDate.value}T00:00:00`);
-  if (preset === 'last-year') {
-    comparisonStartDate.value = toInputDate(new Date(currentStart.getFullYear() - 1, currentStart.getMonth(), currentStart.getDate()));
-    comparisonEndDate.value = toInputDate(new Date(currentEnd.getFullYear() - 1, currentEnd.getMonth(), currentEnd.getDate()));
-    return;
+  const range = getComparisonDateRange(startDate.value, endDate.value, preset);
+  comparisonStartDate.value = range.start;
+  comparisonEndDate.value = range.end;
+}
+
+const calculateMediaProductMetrics = row => ({
+  ...row,
+  cpm: row.impressions ? row.cost / row.impressions * 1000 : 0,
+  cpc: row.clicks ? row.cost / row.clicks : 0,
+  cpv: row.views ? row.cost / row.views : 0,
+  ctr: row.impressions ? row.clicks / row.impressions * 100 : 0,
+  cpo: row.purchases ? row.cost / row.purchases : 0,
+  cvr: row.clicks ? row.purchases / row.clicks * 100 : 0,
+  roas: row.cost ? row.revenue / row.cost * 100 : 0,
+});
+
+async function renderMediaProductReport() {
+  const requestId = ++mediaProductRequestId;
+  const kpis = document.querySelector('#media-product-kpis');
+  const ranking = document.querySelector('#media-product-ranking');
+  const tableBody = document.querySelector('#media-product-table-body');
+  kpis.innerHTML = '<p class="empty-state">성과 데이터를 불러오는 중…</p>';
+  ranking.innerHTML = '<p class="empty-state">데이터를 불러오는 중…</p>';
+  tableBody.innerHTML = '<tr><td colspan="15" class="empty-state">데이터를 불러오는 중…</td></tr>';
+  const query = (start, end) => new URLSearchParams({ business: activeMediaProductBusiness, start, end });
+  try {
+    const [currentResponse, comparisonResponse] = await Promise.all([
+      fetch(`/api/media-product-report?${query(startDate.value, endDate.value)}`, { headers: { Accept: 'application/json' } }),
+      fetch(`/api/media-product-report?${query(comparisonStartDate.value, comparisonEndDate.value)}`, { headers: { Accept: 'application/json' } }),
+    ]);
+    const [currentData, comparisonData] = await Promise.all([readJsonResponse(currentResponse), readJsonResponse(comparisonResponse)]);
+    if (!currentResponse.ok) throw new Error(currentData.error || '현재 기간 데이터를 불러오지 못했습니다.');
+    if (!comparisonResponse.ok) throw new Error(comparisonData.error || '비교 기간 데이터를 불러오지 못했습니다.');
+    if (requestId !== mediaProductRequestId) return;
+    const mediaMatches = media => activeMediaProductMedia === 'all'
+      || (activeMediaProductMedia === 'naver-sa' && media === '네이버 SA')
+      || (activeMediaProductMedia === 'naver-gfa' && media === '네이버 GFA')
+      || (activeMediaProductMedia === 'meta' && media === '메타')
+      || (activeMediaProductMedia === 'google' && media === '구글')
+      || (activeMediaProductMedia === 'criteo' && media === '크리테오');
+    const rows = currentData.rows.filter(row => mediaMatches(row.media)).map(calculateMediaProductMetrics);
+    const totals = rows.reduce((sum, row) => {
+      ['cost', 'impressions', 'clicks', 'views'].forEach(key => { sum[key] += row[key]; });
+      return sum;
+    }, { cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+    currentData.gaDaily.filter(row => mediaMatches(row.media)).forEach(row => { totals.purchases += row.purchases; totals.revenue += row.revenue; });
+    const totalMetrics = calculateMediaProductMetrics(totals);
+    const comparisonRows = comparisonData.rows.filter(row => mediaMatches(row.media));
+    const comparisonTotals = comparisonRows.reduce((sum, row) => {
+      ['cost', 'impressions', 'clicks', 'views'].forEach(key => { sum[key] += row[key]; });
+      return sum;
+    }, { cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+    comparisonData.gaDaily.filter(row => mediaMatches(row.media)).forEach(row => { comparisonTotals.purchases += row.purchases; comparisonTotals.revenue += row.revenue; });
+    const comparisonMetrics = calculateMediaProductMetrics(comparisonTotals);
+    const kpiDefinitions = [
+      ['impressions', '노출수'], ['clicks', '클릭수'], ['views', '조회수'], ['cost', '비용'],
+      ['purchases', '구매(GA)'], ['revenue', '매출액(GA)'], ['cpm', 'CPM'], ['ctr', 'CTR'],
+      ['cpv', 'CPV'], ['cvr', '구매전환율(GA)'], ['cpo', 'CPO'], ['roas', 'ROAS'],
+    ];
+    const formatKpi = (key, value) => ['ctr', 'cvr', 'roas'].includes(key)
+      ? `${Number(value || 0).toFixed(key === 'roas' ? 0 : 2)}%`
+      : number.format(Math.round(Number(value) || 0));
+    const comparisonGap = key => {
+      const current = Number(totalMetrics[key]) || 0;
+      const comparison = Number(comparisonMetrics[key]) || 0;
+      if (!comparison) return '<small class="actual-data"><b>–</b> 비교 기간 대비</small>';
+      const rate = (current - comparison) / comparison * 100;
+      const positive = rate >= 0;
+      return `<small class="${positive ? 'positive' : 'negative'}"><b>${positive ? '▲' : '▼'} ${Math.abs(rate).toFixed(1)}%</b> 비교 기간 대비</small>`;
+    };
+    kpis.innerHTML = kpiDefinitions.map(([key, label]) => `<article class="campaign-kpi ${key === 'roas' ? 'accent' : ''}"><span>${label}</span><strong>${formatKpi(key, totalMetrics[key])}</strong><div class="kpi-progress">${comparisonGap(key)}</div></article>`).join('');
+
+    const dailyMap = new Map();
+    currentData.daily.filter(row => mediaMatches(row.media)).forEach(row => {
+      if (!dailyMap.has(row.date)) dailyMap.set(row.date, { date: row.date, cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+      const daily = dailyMap.get(row.date);
+      ['cost', 'impressions', 'clicks', 'views'].forEach(key => { daily[key] += row[key]; });
+    });
+    currentData.gaDaily.filter(row => mediaMatches(row.media)).forEach(row => {
+      if (!dailyMap.has(row.date)) dailyMap.set(row.date, { date: row.date, cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+      const daily = dailyMap.get(row.date);
+      daily.purchases += row.purchases;
+      daily.revenue += row.revenue;
+    });
+    const dailyRows = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+    if (!dailyRows.length) ranking.innerHTML = '<p class="empty-state">선택 기간의 데이터가 없습니다.</p>';
+    else {
+      const width = 980, height = 175, left = 42, right = 24, top = 18, bottom = 28;
+      const step = (width - left - right) / dailyRows.length;
+      const maxCost = Math.max(...dailyRows.map(row => row.cost), 1) * 1.12;
+      const maxRevenue = Math.max(...dailyRows.map(row => row.revenue), 1) * 1.18;
+      const revenueLine = dailyRows.map((row, index) => `${index ? 'L' : 'M'} ${left + step * index + step / 2} ${top + (height - top - bottom) * (1 - row.revenue / maxRevenue)}`).join(' ');
+      const labelEvery = Math.max(1, Math.ceil(dailyRows.length / 10));
+      ranking.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="일자별 광고비와 매출 추이">
+        ${[0,1,2,3].map(index => `<line class="daily-grid" x1="${left}" y1="${top + index * ((height - top - bottom) / 3)}" x2="${width-right}" y2="${top + index * ((height - top - bottom) / 3)}"/>`).join('')}
+        ${dailyRows.map((row, index) => `<rect class="daily-bar" x="${left + step * index + step * .2}" y="${top + (height-top-bottom)*(1-row.cost/maxCost)}" width="${Math.max(3, step*.6)}" height="${(height-top-bottom)*row.cost/maxCost}" rx="3"><title>${row.date} · 광고비 ${won.format(row.cost)}</title></rect>`).join('')}
+        <path class="daily-line" d="${revenueLine}"/>
+        ${dailyRows.map((row,index) => `<circle class="daily-point" cx="${left+step*index+step/2}" cy="${top+(height-top-bottom)*(1-row.revenue/maxRevenue)}" r="3"><title>${row.date} · 매출 ${won.format(row.revenue)}</title></circle>`).join('')}
+        ${dailyRows.map((row,index) => index % labelEvery === 0 || index === dailyRows.length - 1 ? `<text class="daily-label" x="${left+step*index+step/2}" y="${height-8}" text-anchor="middle">${Number(row.date.slice(5,7))}/${Number(row.date.slice(8,10))}</text>` : '').join('')}
+      </svg>`;
+    }
+
+    const comparisonDailyMap = new Map();
+    comparisonData.daily.filter(row => mediaMatches(row.media)).forEach(row => {
+      if (!comparisonDailyMap.has(row.date)) comparisonDailyMap.set(row.date, { date: row.date, cost: 0 });
+      comparisonDailyMap.get(row.date).cost += row.cost;
+    });
+    const comparisonDailyRows = [...comparisonDailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+    const gap = (row, index) => {
+      const previous = comparisonDailyRows[index]?.cost ?? 0;
+      if (!previous) return '<span class="report-gap neutral">–</span>';
+      const rate = (row.cost - previous) / previous * 100;
+      return `<span class="report-gap ${rate >= 0 ? 'up' : 'down'}">${rate >= 0 ? '▲' : '▼'} ${Math.abs(rate).toFixed(1)}%</span>`;
+    };
+    tableBody.innerHTML = dailyRows.length ? dailyRows.map((daily, index) => {
+      const row = calculateMediaProductMetrics(daily);
+      return `<tr><td><strong>${escapeHtml(row.date)}</strong></td><td>${number.format(Math.round(row.cost))}</td><td>${number.format(Math.round(row.impressions))}</td><td>${number.format(Math.round(row.clicks))}</td><td>${number.format(Math.round(row.views))}</td><td>${number.format(Math.round(row.cpm))}</td><td>${number.format(Math.round(row.cpc))}</td><td>${number.format(Math.round(row.cpv))}</td><td>${row.ctr.toFixed(2)}%</td><td>${number.format(Math.round(row.purchases))}</td><td>${number.format(Math.round(row.revenue))}</td><td>${number.format(Math.round(row.cpo))}</td><td>${row.cvr.toFixed(2)}%</td><td>${row.roas.toFixed(0)}%</td><td>${gap(row, index)}</td></tr>`;
+    }).join('') : '<tr><td colspan="15" class="empty-state">선택 기간의 데이터가 없습니다.</td></tr>';
+  } catch (error) {
+    if (requestId !== mediaProductRequestId) return;
+    const message = escapeHtml(error.message);
+    kpis.innerHTML = `<p class="empty-state">${message}</p>`;
+    ranking.innerHTML = '<p class="empty-state">실제 데이터를 불러오지 못했습니다.</p>';
+    tableBody.innerHTML = '<tr><td colspan="15" class="empty-state">실제 데이터를 불러오지 못했습니다.</td></tr>';
   }
-  const days = Math.max(1, Math.round((currentEnd - currentStart) / 86400000) + 1);
-  const comparisonEnd = addDays(currentStart, -1);
-  comparisonStartDate.value = toInputDate(addDays(comparisonEnd, -(days - 1)));
-  comparisonEndDate.value = toInputDate(comparisonEnd);
+}
+
+async function renderGaReport() {
+  const requestId = ++gaReportRequestId;
+  const kpis = document.querySelector('#ga-kpis');
+  const chart = document.querySelector('#ga-daily-chart');
+  const campaignRanking = document.querySelector('#ga-purchase-campaigns');
+  const tableBody = document.querySelector('#ga-daily-table-body');
+  kpis.innerHTML = chart.innerHTML = campaignRanking.innerHTML = '<p class="empty-state">GA 데이터를 불러오는 중…</p>';
+  tableBody.innerHTML = '<tr><td colspan="9" class="empty-state">데이터를 불러오는 중…</td></tr>';
+  const query = (start, end) => new URLSearchParams({ business: activeGaBusiness, start, end });
+  try {
+    const [currentResponse, comparisonResponse, campaignResponse] = await Promise.all([
+      fetch(`/api/overview-metrics?${query(startDate.value, endDate.value)}`, { headers: { Accept: 'application/json' } }),
+      fetch(`/api/overview-metrics?${query(comparisonStartDate.value, comparisonEndDate.value)}`, { headers: { Accept: 'application/json' } }),
+      fetch(`/api/ga-purchase-campaigns?${query(startDate.value, endDate.value)}`, { headers: { Accept: 'application/json' } }),
+    ]);
+    const [currentData, comparisonData, campaignData] = await Promise.all([readJsonResponse(currentResponse), readJsonResponse(comparisonResponse), readJsonResponse(campaignResponse)]);
+    if (!currentResponse.ok) throw new Error(currentData.error || '현재 기간 GA 데이터를 불러오지 못했습니다.');
+    if (!comparisonResponse.ok) throw new Error(comparisonData.error || '비교 기간 GA 데이터를 불러오지 못했습니다.');
+    if (!campaignResponse.ok) throw new Error(campaignData.error || '세션 캠페인 데이터를 불러오지 못했습니다.');
+    if (requestId !== gaReportRequestId) return;
+    const metrics = {
+      sessions: currentData.metrics.sessions, users: currentData.metrics.users, carts: currentData.metrics.carts, purchases: currentData.metrics.conversions, revenue: currentData.metrics.revenue,
+      cartRate: currentData.metrics.sessions ? currentData.metrics.carts / currentData.metrics.sessions * 100 : 0,
+      conversionRate: currentData.metrics.sessions ? currentData.metrics.conversions / currentData.metrics.sessions * 100 : 0,
+      avgDuration: currentData.metrics.avgDuration, newUserShare: currentData.metrics.newUserShare,
+      averageOrderValue: currentData.metrics.conversions ? currentData.metrics.revenue / currentData.metrics.conversions : 0,
+    };
+    const previous = {
+      sessions: comparisonData.metrics.sessions, users: comparisonData.metrics.users, carts: comparisonData.metrics.carts, purchases: comparisonData.metrics.conversions, revenue: comparisonData.metrics.revenue,
+      cartRate: comparisonData.metrics.sessions ? comparisonData.metrics.carts / comparisonData.metrics.sessions * 100 : 0,
+      conversionRate: comparisonData.metrics.sessions ? comparisonData.metrics.conversions / comparisonData.metrics.sessions * 100 : 0,
+      avgDuration: comparisonData.metrics.avgDuration, newUserShare: comparisonData.metrics.newUserShare,
+      averageOrderValue: comparisonData.metrics.conversions ? comparisonData.metrics.revenue / comparisonData.metrics.conversions : 0,
+    };
+    const definitions = [
+      ['sessions','세션 수'],['users','총 사용자'],['purchases','구매 수'],['carts','장바구니 추가'],['revenue','총수익'],
+      ['avgDuration','평균 세션 시간'],['newUserShare','새 사용자 비중'],['conversionRate','구매 전환율'],['cartRate','장바구니 전환율'],['averageOrderValue','객단가'],
+    ];
+    const format = (key, value) => {
+      if (['cartRate', 'conversionRate', 'newUserShare'].includes(key)) return `${value.toFixed(2)}%`;
+      if (key === 'avgDuration') { const seconds = Math.round(value); return `${Math.floor(seconds / 60)}분 ${String(seconds % 60).padStart(2, '0')}초`; }
+      return number.format(Math.round(value));
+    };
+    const gap = key => {
+      if (!previous[key]) return '<small class="actual-data"><b>–</b> 비교 기간 대비</small>';
+      const rate = (metrics[key] - previous[key]) / previous[key] * 100;
+      return `<small class="${rate >= 0 ? 'positive' : 'negative'}"><b>${rate >= 0 ? '▲' : '▼'} ${Math.abs(rate).toFixed(1)}%</b> 비교 기간 대비</small>`;
+    };
+    kpis.innerHTML = definitions.map(([key,label]) => `<button type="button" class="campaign-kpi ga-kpi-select${selectedGaTrendMetrics.includes(key) ? ' selected' : ''}" data-ga-metric="${key}" aria-pressed="${selectedGaTrendMetrics.includes(key)}"><span>${label}</span><strong>${format(key, metrics[key])}</strong><div class="kpi-progress">${gap(key)}</div></button>`).join('');
+
+    const rows = currentData.trend;
+    const dailyValue = (row, key) => {
+      if (key === 'purchases') return row.conversions;
+      if (key === 'cartRate') return row.sessions ? row.carts / row.sessions * 100 : 0;
+      if (key === 'conversionRate') return row.sessions ? row.conversions / row.sessions * 100 : 0;
+      if (key === 'newUserShare') return row.users ? row.newUsers / row.users * 100 : 0;
+      if (key === 'averageOrderValue') return row.conversions ? row.revenue / row.conversions : 0;
+      return row[key] ?? 0;
+    };
+    const renderTrend = () => {
+      const selectedDefinitions = definitions.filter(([key]) => selectedGaTrendMetrics.includes(key));
+      const trendTitle = document.querySelector('#ga-trend-title');
+      const trendDescription = document.querySelector('#ga-trend-description');
+      const trendLegend = document.querySelector('#ga-trend-legend');
+      const labels = selectedDefinitions.map(([, label]) => label);
+      trendTitle.textContent = labels.length ? `일자별 ${labels.join('·')}` : '일자별 GA 성과';
+      trendDescription.textContent = '상단 스코어보드에서 최대 3개 지표를 선택할 수 있습니다.';
+      trendLegend.innerHTML = selectedDefinitions.map(([key, label], index) => `<span><i class="ga-series-${index + 1}"></i>${label}</span>`).join('');
+      if (!rows.length) { chart.innerHTML = '<p class="empty-state">선택 기간의 데이터가 없습니다.</p>'; return; }
+      if (!selectedDefinitions.length) { chart.innerHTML = '<p class="empty-state">상단 스코어보드에서 지표를 선택해 주세요.</p>'; return; }
+      const width = 760, height = 220, left = 35, right = 20, top = 18, bottom = 32;
+      const step = (width-left-right)/rows.length;
+      const labelEvery = Math.max(1, Math.ceil(rows.length/8));
+      const series = selectedDefinitions.map(([key, label], seriesIndex) => {
+        const max = Math.max(...rows.map(row => dailyValue(row, key)), 1) * 1.15;
+        const points = rows.map((row, index) => ({ x: left + step * index + step / 2, y: top + (height-top-bottom) * (1-dailyValue(row,key)/max), row }));
+        const path = points.map((point,index)=>`${index?'L':'M'} ${point.x} ${point.y}`).join(' ');
+        return `<path class="ga-trend-line ga-series-${seriesIndex+1}" d="${path}"/>${points.map(point=>`<circle class="ga-trend-point ga-series-${seriesIndex+1}" cx="${point.x}" cy="${point.y}" r="3"><title>${point.row.date} · ${label} ${format(key,dailyValue(point.row,key))}</title></circle>`).join('')}`;
+      }).join('');
+      chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(labels.join(', '))} 일자별 추이">${[0,1,2,3].map(index=>`<line class="daily-grid" x1="${left}" y1="${top+index*((height-top-bottom)/3)}" x2="${width-right}" y2="${top+index*((height-top-bottom)/3)}"/>`).join('')}${series}${rows.map((row,index)=>index%labelEvery===0||index===rows.length-1?`<text class="daily-label" x="${left+step*index+step/2}" y="${height-8}" text-anchor="middle">${Number(row.date.slice(5,7))}/${Number(row.date.slice(8,10))}</text>`:'').join('')}</svg>`;
+    };
+    kpis.querySelectorAll('[data-ga-metric]').forEach(button => button.addEventListener('click', () => {
+      const key = button.dataset.gaMetric;
+      if (selectedGaTrendMetrics.includes(key)) selectedGaTrendMetrics = selectedGaTrendMetrics.filter(item => item !== key);
+      else if (selectedGaTrendMetrics.length < 3) selectedGaTrendMetrics = [...selectedGaTrendMetrics, key];
+      else return;
+      kpis.querySelectorAll('[data-ga-metric]').forEach(item => {
+        const selected = selectedGaTrendMetrics.includes(item.dataset.gaMetric);
+        item.classList.toggle('selected', selected);
+        item.setAttribute('aria-pressed', String(selected));
+      });
+      renderTrend();
+    }));
+    renderTrend();
+    const maxPurchases = Math.max(...campaignData.campaigns.map(row => row.purchases), 1);
+    campaignRanking.innerHTML = campaignData.campaigns.length ? campaignData.campaigns.map((row,index)=>`<div class="ga-purchase-campaign-row"><span>${String(index+1).padStart(2,'0')}</span><div><strong title="${escapeHtml(row.campaign)}">${escapeHtml(row.campaign)}</strong><i><b style="width:${row.purchases/maxPurchases*100}%"></b></i></div><b>${number.format(row.purchases)}건</b></div>`).join('') : '<p class="empty-state">선택 기간의 구매 캠페인이 없습니다.</p>';
+    tableBody.innerHTML = rows.length ? rows.map(row => {
+      const conversionRate = row.sessions ? row.conversions / row.sessions * 100 : 0;
+      const cartRate = row.sessions ? row.carts / row.sessions * 100 : 0;
+      const revenuePerSession = row.sessions ? row.revenue / row.sessions : 0;
+      return `<tr><td><strong>${escapeHtml(row.date)}</strong></td><td>${number.format(row.sessions)}</td><td>${number.format(row.users)}</td><td>${number.format(row.carts)}</td><td>${cartRate.toFixed(2)}%</td><td>${number.format(row.conversions)}</td><td>${number.format(Math.round(row.revenue))}</td><td>${conversionRate.toFixed(2)}%</td><td>${number.format(Math.round(revenuePerSession))}</td></tr>`;
+    }).join('') : '<tr><td colspan="9" class="empty-state">선택 기간의 데이터가 없습니다.</td></tr>';
+  } catch (error) {
+    if (requestId !== gaReportRequestId) return;
+    kpis.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+    chart.innerHTML = campaignRanking.innerHTML = '<p class="empty-state">실제 GA 데이터를 불러오지 못했습니다.</p>';
+    tableBody.innerHTML = '<tr><td colspan="9" class="empty-state">실제 GA 데이터를 불러오지 못했습니다.</td></tr>';
+  }
 }
 
 function updateComparisonPeriodLabel() {
-  const labels = { previous: '직전 동일 기간', 'last-year': '전년 동일 기간', custom: '선택 기간' };
+  const labels = { previous: '직전 동일 기간', 'previous-weekday': '전주 동요일', 'previous-month-weekday': '전월 동요일', 'last-year': '전년 동일 기간', custom: '선택 기간' };
   comparisonPeriodSummary.textContent = labels[selectedComparisonPreset];
   comparisonPeriodDates.textContent = `${formatDate(comparisonStartDate.value)} – ${formatDate(comparisonEndDate.value)}`;
   document.querySelectorAll('[data-comparison-period]').forEach(button => button.classList.toggle('active', button.dataset.comparisonPeriod === selectedComparisonPreset));
@@ -1073,10 +1570,12 @@ function applyPeriod() {
   const labels = { yesterday: '어제', 7: '지난 7일', 30: '지난 30일', 90: '지난 90일', 'this-month': '이번 달', 'last-month': '지난 달', custom: '선택 기간' };
   periodSummary.textContent = labels[selectedPreset];
   periodDates.textContent = `${formatDate(startDate.value)} – ${formatDate(endDate.value)}`;
-  document.querySelectorAll('.period-presets button').forEach(button => button.classList.toggle('active', button.dataset.period === selectedPreset));
+  document.querySelectorAll('[data-period]').forEach(button => button.classList.toggle('active', button.dataset.period === selectedPreset));
   if (selectedComparisonPreset !== 'custom') setComparisonDateRange();
   updateComparisonPeriodLabel();
-  render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
+  if (window.location.hash === '#media-product-report') renderMediaProductReport();
+  else if (window.location.hash === '#ga-report') renderGaReport();
+  else render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
   renderCampaignReport();
   closePeriodPicker();
   if (window.location.hash === '#campaign-report') saveCampaignReportState();
@@ -1096,10 +1595,10 @@ periodTrigger.addEventListener('click', () => {
   periodPicker.hidden = !periodPicker.hidden;
   periodTrigger.setAttribute('aria-expanded', String(!periodPicker.hidden));
 });
-document.querySelectorAll('.period-presets button').forEach(button => button.addEventListener('click', () => {
+document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => {
   selectedPreset = button.dataset.period;
   if (selectedPreset !== 'custom') setDateRange(selectedPreset);
-  document.querySelectorAll('.period-presets button').forEach(item => item.classList.toggle('active', item === button));
+  document.querySelectorAll('[data-period]').forEach(item => item.classList.toggle('active', item === button));
 }));
 [startDate, endDate].forEach(input => input.addEventListener('change', () => { selectedPreset = 'custom'; }));
 document.querySelector('#period-apply').addEventListener('click', applyPeriod);
@@ -1117,7 +1616,9 @@ document.querySelectorAll('[data-comparison-period]').forEach(button => button.a
 [comparisonStartDate, comparisonEndDate].forEach(input => input.addEventListener('change', () => { selectedComparisonPreset = 'custom'; }));
 document.querySelector('#comparison-period-apply').addEventListener('click', () => {
   updateComparisonPeriodLabel();
-  render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
+  if (window.location.hash === '#media-product-report') renderMediaProductReport();
+  else if (window.location.hash === '#ga-report') renderGaReport();
+  else render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
   closeComparisonPeriodPicker();
 });
 document.querySelector('#comparison-period-cancel').addEventListener('click', closeComparisonPeriodPicker);
@@ -1151,6 +1652,99 @@ document.addEventListener('click', event => {
   }
 });
 document.querySelectorAll('[data-report-tab]').forEach(button => button.addEventListener('click', () => showCampaignTab(button.dataset.reportTab)));
+document.querySelector('#creative-upload-form').addEventListener('submit', uploadCampaignCreative);
+function updateCreativeFileSummary() {
+  const files = [...document.querySelector('#creative-file').files];
+  document.querySelector('#creative-file-name').textContent = files.length > 1 ? `${files.length}개 이미지 선택됨` : files[0]?.name || '이미지 선택 또는 Ctrl+V로 붙여넣기';
+}
+document.querySelector('#creative-file').addEventListener('change', updateCreativeFileSummary);
+const creativeLabelInput = document.querySelector('#creative-label');
+creativeLabelInput.addEventListener('focus', () => renderCreativeLabelSuggestions(creativeLabelInput.value));
+creativeLabelInput.addEventListener('input', () => renderCreativeLabelSuggestions(creativeLabelInput.value));
+document.querySelector('#creative-label-suggestions').addEventListener('click', event => {
+  const option = event.target.closest('[data-creative-label]');
+  if (!option) return;
+  creativeLabelInput.value = option.dataset.creativeLabel;
+  document.querySelector('#creative-label-suggestions').hidden = true;
+  creativeLabelInput.focus();
+});
+const creativeUploadDialog = document.querySelector('#creative-upload-dialog');
+const creativeGalleryDialog = document.querySelector('#creative-gallery-dialog');
+const creativeEditDialog = document.querySelector('#creative-edit-dialog');
+document.querySelector('#creative-library').addEventListener('click', event => {
+  const group = event.target.closest('[data-creative-media][data-creative-label][data-creative-type]');
+  if (group) openCreativeGallery(group.dataset.creativeMedia, group.dataset.creativeLabel, group.dataset.creativeType);
+});
+document.querySelector('#creative-gallery').addEventListener('click', event => {
+  const deleteButton = event.target.closest('[data-delete-creative]');
+  if (deleteButton) { deleteCampaignCreative(deleteButton.dataset.deleteCreative); return; }
+  const card = event.target.closest('[data-edit-creative]');
+  if (card) openCreativeEditor(card.dataset.editCreative);
+});
+document.querySelector('#creative-gallery').addEventListener('keydown', event => {
+  const card = event.target.closest('[data-edit-creative]');
+  if (card && ['Enter', ' '].includes(event.key)) { event.preventDefault(); openCreativeEditor(card.dataset.editCreative); }
+});
+document.querySelector('#creative-gallery-close').addEventListener('click', () => creativeGalleryDialog.close());
+creativeGalleryDialog.addEventListener('click', event => { if (event.target === creativeGalleryDialog) creativeGalleryDialog.close(); });
+document.querySelector('#creative-edit-form').addEventListener('submit', saveCreativeEdit);
+document.querySelector('#creative-edit-close').addEventListener('click', () => creativeEditDialog.close());
+creativeEditDialog.addEventListener('click', event => { if (event.target === creativeEditDialog) creativeEditDialog.close(); });
+document.querySelector('#creative-upload-open').addEventListener('click', () => {
+  if (!updateCreativeUploadState()) return;
+  document.querySelector('#creative-upload-message').textContent = '';
+  creativeUploadDialog.showModal();
+  document.querySelector('#creative-media').focus();
+});
+document.querySelector('#creative-upload-close').addEventListener('click', () => creativeUploadDialog.close());
+creativeUploadDialog.addEventListener('click', event => { if (event.target === creativeUploadDialog) creativeUploadDialog.close(); });
+creativeUploadDialog.addEventListener('paste', async event => {
+  let pastedImages = [...(event.clipboardData?.items ?? [])].filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter(Boolean);
+  const html = event.clipboardData?.getData('text/html') ?? '';
+  const imageSources = html ? [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('img')].map(image => image.src).filter(source => /^(data:image\/|https?:\/\/)/.test(source)) : [];
+  if (!pastedImages.length && imageSources.length) {
+    event.preventDefault();
+    const loadedImages = await Promise.allSettled(imageSources.map(async source => {
+      const response = await fetch(source, { credentials: 'include' });
+      if (!response.ok) throw new Error(`이미지 가져오기 실패 (${response.status})`);
+      return response.blob();
+    }));
+    pastedImages = loadedImages.filter(result => result.status === 'fulfilled' && result.value.type.startsWith('image/')).map(result => result.value);
+  }
+  if (!pastedImages.length) {
+    if (imageSources.length || (!event.target.matches('input, textarea') && (html || event.clipboardData?.files?.length))) {
+      document.querySelector('#creative-upload-message').textContent = 'Google Sheets 셀 복사에는 이미지 원본이 포함되지 않았습니다. 이미지 자체를 우클릭해 “이미지 복사”한 뒤 다시 붙여넣어 주세요.';
+    }
+    return;
+  }
+  event.preventDefault();
+  const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+  const unsupported = pastedImages.find(file => !allowedTypes.has(file.type));
+  const oversized = pastedImages.find(file => file.size > 8 * 1024 * 1024);
+  const message = document.querySelector('#creative-upload-message');
+  if (unsupported) { message.textContent = '클립보드 이미지는 PNG, JPG, WEBP, GIF 형식만 지원합니다.'; return; }
+  if (oversized) { message.textContent = '클립보드 이미지가 8MB를 초과합니다.'; return; }
+  const fileInput = document.querySelector('#creative-file');
+  const transfer = new DataTransfer();
+  [...fileInput.files].forEach(file => transfer.items.add(file));
+  const timestamp = Date.now();
+  const extensions = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+  pastedImages.forEach((file, index) => transfer.items.add(new File([file], `clipboard-${timestamp}-${index + 1}.${extensions[file.type]}`, { type: file.type, lastModified: timestamp })));
+  fileInput.files = transfer.files;
+  updateCreativeFileSummary();
+  message.textContent = `클립보드 이미지 ${pastedImages.length}개가 추가되었습니다.`;
+  document.querySelector('.creative-file-field > span').classList.add('paste-flash');
+  window.setTimeout(() => document.querySelector('.creative-file-field > span').classList.remove('paste-flash'), 650);
+});
+creativeUploadDialog.addEventListener('close', () => {
+  document.querySelector('#creative-upload-form').reset();
+  document.querySelector('#creative-file-name').textContent = '이미지 선택 또는 Ctrl+V로 붙여넣기';
+  document.querySelector('#creative-upload-message').textContent = '';
+  document.querySelector('#creative-label-suggestions').hidden = true;
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.creative-label-field')) document.querySelector('#creative-label-suggestions').hidden = true;
+});
 document.querySelector('#campaign-kpis').addEventListener('click', event => {
   const card = event.target.closest('[data-kpi-key]');
   if (card) toggleTrendMetric(card.dataset.kpiKey);
@@ -1173,6 +1767,21 @@ document.querySelector('#overview-business').addEventListener('change', event =>
   activeOverviewBusiness = event.target.value;
   render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
 });
+document.querySelectorAll('[data-media-product-business]').forEach(button => button.addEventListener('click', () => {
+  activeMediaProductBusiness = button.dataset.mediaProductBusiness;
+  document.querySelectorAll('[data-media-product-business]').forEach(item => item.classList.toggle('active', item === button));
+  renderMediaProductReport();
+}));
+document.querySelectorAll('[data-media-product-media]').forEach(button => button.addEventListener('click', () => {
+  activeMediaProductMedia = button.dataset.mediaProductMedia;
+  document.querySelectorAll('[data-media-product-media]').forEach(item => item.classList.toggle('active', item === button));
+  renderMediaProductReport();
+}));
+document.querySelectorAll('[data-ga-business]').forEach(button => button.addEventListener('click', () => {
+  activeGaBusiness = button.dataset.gaBusiness;
+  document.querySelectorAll('[data-ga-business]').forEach(item => item.classList.toggle('active', item === button));
+  renderGaReport();
+}));
 document.querySelectorAll('[data-weekly-media-view]').forEach(button => button.addEventListener('click', () => {
   weeklyMediaViewMode = button.dataset.weeklyMediaView;
   document.querySelectorAll('[data-weekly-media-view]').forEach(item => item.classList.toggle('active', item === button));
