@@ -1288,8 +1288,8 @@ const saveCampaignReportState = overrides => {
   try { window.localStorage.setItem(campaignReportStateKey, JSON.stringify(state)); } catch {}
   Object.assign(savedCampaignReportState, state);
 };
-let selectedPreset = ['yesterday', '7', '30', '90', 'this-month', 'last-month', 'custom'].includes(savedCampaignReportState.preset) ? savedCampaignReportState.preset : 'yesterday';
-let selectedComparisonPreset = 'previous';
+let selectedPreset = ['yesterday', '7', '30', '90', 'this-month', 'last-month', 'custom'].includes(savedCampaignReportState.preset) ? savedCampaignReportState.preset : '7';
+let selectedComparisonPreset = 'previous-weekday';
 
 const toInputDate = date => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
@@ -1455,19 +1455,23 @@ async function renderGaReport() {
   const chart = document.querySelector('#ga-daily-chart');
   const campaignRanking = document.querySelector('#ga-purchase-campaigns');
   const tableBody = document.querySelector('#ga-daily-table-body');
+  const detailTableBody = document.querySelector('#ga-detail-table-body');
   kpis.innerHTML = chart.innerHTML = campaignRanking.innerHTML = '<p class="empty-state">GA 데이터를 불러오는 중…</p>';
   tableBody.innerHTML = '<tr><td colspan="9" class="empty-state">데이터를 불러오는 중…</td></tr>';
-  const query = (start, end) => new URLSearchParams({ business: activeGaBusiness, start, end });
+  detailTableBody.innerHTML = '<tr><td colspan="10" class="empty-state">데이터를 불러오는 중…</td></tr>';
+  const query = (start, end) => new URLSearchParams({ business: activeGaBusiness, revenueSource: 'ga4', start, end });
   try {
-    const [currentResponse, comparisonResponse, campaignResponse] = await Promise.all([
+    const [currentResponse, comparisonResponse, campaignResponse, detailResponse] = await Promise.all([
       fetch(`/api/overview-metrics?${query(startDate.value, endDate.value)}`, { headers: { Accept: 'application/json' } }),
       fetch(`/api/overview-metrics?${query(comparisonStartDate.value, comparisonEndDate.value)}`, { headers: { Accept: 'application/json' } }),
       fetch(`/api/ga-purchase-campaigns?${query(startDate.value, endDate.value)}`, { headers: { Accept: 'application/json' } }),
+      fetch(`/api/ga-detail?${query(startDate.value, endDate.value)}`, { headers: { Accept: 'application/json' } }),
     ]);
-    const [currentData, comparisonData, campaignData] = await Promise.all([readJsonResponse(currentResponse), readJsonResponse(comparisonResponse), readJsonResponse(campaignResponse)]);
+    const [currentData, comparisonData, campaignData, detailData] = await Promise.all([readJsonResponse(currentResponse), readJsonResponse(comparisonResponse), readJsonResponse(campaignResponse), readJsonResponse(detailResponse)]);
     if (!currentResponse.ok) throw new Error(currentData.error || '현재 기간 GA 데이터를 불러오지 못했습니다.');
     if (!comparisonResponse.ok) throw new Error(comparisonData.error || '비교 기간 GA 데이터를 불러오지 못했습니다.');
     if (!campaignResponse.ok) throw new Error(campaignData.error || '세션 캠페인 데이터를 불러오지 못했습니다.');
+    if (!detailResponse.ok) throw new Error(detailData.error || 'GA 상세 데이터를 불러오지 못했습니다.');
     if (requestId !== gaReportRequestId) return;
     const metrics = {
       sessions: currentData.metrics.sessions, users: currentData.metrics.users, carts: currentData.metrics.carts, purchases: currentData.metrics.conversions, revenue: currentData.metrics.revenue,
@@ -1551,11 +1555,18 @@ async function renderGaReport() {
       const revenuePerSession = row.sessions ? row.revenue / row.sessions : 0;
       return `<tr><td><strong>${escapeHtml(row.date)}</strong></td><td>${number.format(row.sessions)}</td><td>${number.format(row.users)}</td><td>${number.format(row.carts)}</td><td>${cartRate.toFixed(2)}%</td><td>${number.format(row.conversions)}</td><td>${number.format(Math.round(row.revenue))}</td><td>${conversionRate.toFixed(2)}%</td><td>${number.format(Math.round(revenuePerSession))}</td></tr>`;
     }).join('') : '<tr><td colspan="9" class="empty-state">선택 기간의 데이터가 없습니다.</td></tr>';
+    detailTableBody.innerHTML = detailData.rows.length ? detailData.rows.map(row => {
+      const cartRate = row.sessions ? row.carts / row.sessions * 100 : 0;
+      const conversionRate = row.sessions ? row.purchases / row.sessions * 100 : 0;
+      const revenuePerSession = row.sessions ? row.revenue / row.sessions : 0;
+      return `<tr><td title="${escapeHtml(row.sourceMedium)}"><strong>${escapeHtml(row.sourceMedium)}</strong></td><td title="${escapeHtml(row.sessionCampaign)}">${escapeHtml(row.sessionCampaign)}</td><td>${number.format(row.sessions)}</td><td>${number.format(row.users)}</td><td>${number.format(row.carts)}</td><td>${cartRate.toFixed(2)}%</td><td>${number.format(row.purchases)}</td><td>${number.format(Math.round(row.revenue))}</td><td>${conversionRate.toFixed(2)}%</td><td>${number.format(Math.round(revenuePerSession))}</td></tr>`;
+    }).join('') : '<tr><td colspan="10" class="empty-state">선택 기간의 상세 데이터가 없습니다.</td></tr>';
   } catch (error) {
     if (requestId !== gaReportRequestId) return;
     kpis.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
     chart.innerHTML = campaignRanking.innerHTML = '<p class="empty-state">실제 GA 데이터를 불러오지 못했습니다.</p>';
     tableBody.innerHTML = '<tr><td colspan="9" class="empty-state">실제 GA 데이터를 불러오지 못했습니다.</td></tr>';
+    detailTableBody.innerHTML = '<tr><td colspan="10" class="empty-state">실제 GA 상세 데이터를 불러오지 못했습니다.</td></tr>';
   }
 }
 
@@ -1824,8 +1835,8 @@ if (window.location.hash === '#campaign-report'
   startDate.value = savedCampaignReportState.startDate;
   endDate.value = savedCampaignReportState.endDate;
 } else {
-  selectedPreset = 'yesterday';
-  setDateRange('yesterday');
+  selectedPreset = '7';
+  setDateRange('7');
 }
 applyPeriod();
 updateCampaignDrilldown();
