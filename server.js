@@ -114,6 +114,33 @@ async function getGoogleAccessToken(scope = 'https://www.googleapis.com/auth/spr
   return tokenResult.access_token;
 }
 
+async function getGaTotalRevenue({ business = 'all', startDate, endDate, dimensions = [] }) {
+  const accessToken = await getGoogleAccessToken('https://www.googleapis.com/auth/analytics.readonly');
+  const campaignFilter = value => ({ filter: { fieldName: 'sessionCampaignName', stringFilter: { matchType: 'CONTAINS', value, caseSensitive: false } } });
+  const businessExpressions = business === 'MKT'
+    ? [campaignFilter('MKT')]
+    : business === 'PERF'
+      ? [{ orGroup: { expressions: [campaignFilter('_EC_'), campaignFilter('PERF')] } }]
+      : [{ orGroup: { expressions: [campaignFilter('MKT'), campaignFilter('_EC_'), campaignFilter('PERF')] } }];
+  const apiResponse = await fetch('https://analyticsdata.googleapis.com/v1beta/properties/496808362:runReport', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      dateRanges: [{ startDate, endDate }],
+      dimensions: dimensions.map(name => ({ name })),
+      metrics: [{ name: 'totalRevenue' }],
+      dimensionFilter: businessExpressions.length === 1 ? businessExpressions[0] : { andGroup: { expressions: businessExpressions } },
+      limit: 100000,
+    }),
+  });
+  const result = await apiResponse.json();
+  if (!apiResponse.ok) throw new Error(`GA Data API 조회 실패 (${apiResponse.status}): ${result.error?.message ?? '알 수 없는 오류'}`);
+  return (result.rows ?? []).map(row => ({
+    dimensions: (row.dimensionValues ?? []).map(value => value.value ?? ''),
+    totalRevenue: Number(row.metricValues?.[0]?.value ?? 0),
+  }));
+}
+
 async function getCampaignFilters() {
   if (campaignCache.expiresAt > Date.now()) return campaignCache.values;
 
@@ -613,7 +640,7 @@ async function getCampaignMediaMetrics({ campaign, business, mediaAdTypes, media
   return { metrics, trend, weeklyGa };
 }
 
-async function getOverviewMetrics({ business, startDate, endDate }) {
+async function getOverviewMetrics({ business, startDate, endDate, useGaTotalRevenue = false }) {
   const accessToken = await getGoogleAccessToken('https://www.googleapis.com/auth/bigquery.readonly');
   const queryParameters = [
     { name: 'business', parameterType: { type: 'STRING' }, parameterValue: { value: business } },
@@ -702,6 +729,15 @@ async function getOverviewMetrics({ business, startDate, endDate }) {
     impressions: Number(row.f[1]?.v ?? 0), clicks: Number(row.f[2]?.v ?? 0), views: Number(row.f[3]?.v ?? 0), cost: Number(row.f[4]?.v ?? 0),
     conversions: Number(row.f[5]?.v ?? 0), revenue: Number(row.f[6]?.v ?? 0), sessions: Number(row.f[7]?.v ?? 0), users: Number(row.f[8]?.v ?? 0), carts: Number(row.f[9]?.v ?? 0), avgDuration: Number(row.f[10]?.v ?? 0), newUsers: Number(row.f[11]?.v ?? 0),
   }));
+  if (useGaTotalRevenue) {
+    try {
+      const gaRevenueRows = await getGaTotalRevenue({ business, startDate, endDate, dimensions: ['date'] });
+      const revenueByDate = new Map(gaRevenueRows.map(row => [row.dimensions[0], row.totalRevenue]));
+      trend.forEach(row => { row.revenue = revenueByDate.get(row.date.replaceAll('-', '')) ?? 0; });
+    } catch (error) {
+      console.warn(`GA totalRevenue fallback: ${error.message}`);
+    }
+  }
   const totals = trend.reduce((sum, row) => {
     ['impressions', 'clicks', 'views', 'cost', 'conversions', 'revenue', 'sessions', 'users', 'carts', 'newUsers'].forEach(key => { sum[key] += row[key]; });
     return sum;
@@ -814,12 +850,92 @@ async function getMediaProductReport({ business, startDate, endDate }) {
   return { rows, daily, gaDaily };
 }
 
+async function getGaDetailData({ business, startDate, endDate, useGaTotalRevenue = false }) {
+  const accessToken = await getGoogleAccessToken('https://www.googleapis.com/auth/bigquery.readonly');
+  const query = `WITH ga_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', _TABLE_SUFFIX) AS metric_date,
+      CASE
+        WHEN STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), 'MKT') > 0 THEN 'MKT'
+        WHEN STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), '_EC_') > 0
+          OR STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), 'PERF') > 0 THEN 'PERF'
+        ELSE NULL
+      END AS business_unit,
+      CONCAT(COALESCE(session_traffic_source_last_click.cross_channel_campaign.source, '(not set)'), ' / ', COALESCE(session_traffic_source_last_click.cross_channel_campaign.medium, '(not set)')) AS source_medium,
+      COALESCE(NULLIF(session_traffic_source_last_click.cross_channel_campaign.campaign_name, ''), '(not set)') AS session_campaign,
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      event_name,
+      ecommerce.purchase_revenue AS purchase_revenue
+    FROM \`planar-method-169102.analytics_496808362.events_*\`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date) AND FORMAT_DATE('%Y%m%d', @end_date)
+  ), ga_sessions AS (
+    SELECT
+      metric_date,
+      MAX(source_medium) AS source_medium,
+      MAX(session_campaign) AS session_campaign,
+      user_pseudo_id,
+      ga_session_id,
+      COUNTIF(event_name = 'add_to_cart') AS carts,
+      COUNTIF(event_name = 'purchase') AS purchases,
+      COALESCE(SUM(IF(event_name = 'purchase', purchase_revenue, 0)), 0) AS revenue
+    FROM ga_events
+    WHERE business_unit IS NOT NULL AND (@business = 'all' OR business_unit = @business)
+    GROUP BY metric_date, business_unit, user_pseudo_id, ga_session_id
+  )
+  SELECT source_medium, session_campaign,
+    COUNTIF(ga_session_id IS NOT NULL) AS sessions,
+    COUNT(DISTINCT user_pseudo_id) AS users,
+    SUM(carts) AS carts,
+    SUM(purchases) AS purchases,
+    SUM(revenue) AS revenue
+  FROM ga_sessions
+  GROUP BY source_medium, session_campaign
+  ORDER BY sessions DESC, revenue DESC
+  LIMIT 1000`;
+  const queryResponse = await fetch('https://bigquery.googleapis.com/bigquery/v2/projects/planar-method-169102/queries', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query, useLegacySql: false, location: 'asia-northeast3', timeoutMs: 30000, parameterMode: 'NAMED',
+      queryParameters: [
+        { name: 'business', parameterType: { type: 'STRING' }, parameterValue: { value: business } },
+        { name: 'start_date', parameterType: { type: 'DATE' }, parameterValue: { value: startDate } },
+        { name: 'end_date', parameterType: { type: 'DATE' }, parameterValue: { value: endDate } },
+      ],
+    }),
+  });
+  const result = await queryResponse.json();
+  if (!queryResponse.ok || result.errors?.length) throw new Error(`BigQuery 조회 실패 (${queryResponse.status}): ${result.errors?.[0]?.message ?? result.error?.message ?? '알 수 없는 오류'}`);
+  if (!result.jobComplete) throw new Error('BigQuery 조회 시간이 초과되었습니다.');
+  const rows = (result.rows ?? []).map(row => ({
+    sourceMedium: row.f[0]?.v ?? '(not set)', sessionCampaign: row.f[1]?.v ?? '(not set)',
+    sessions: Number(row.f[2]?.v ?? 0), users: Number(row.f[3]?.v ?? 0), carts: Number(row.f[4]?.v ?? 0),
+    purchases: Number(row.f[5]?.v ?? 0), revenue: Number(row.f[6]?.v ?? 0),
+  }));
+  if (useGaTotalRevenue) {
+    try {
+      const gaRevenueRows = await getGaTotalRevenue({ business, startDate, endDate, dimensions: ['sessionSourceMedium', 'sessionCampaignName'] });
+      const revenueByDimension = new Map(gaRevenueRows.map(row => [row.dimensions.join('\u0000'), row.totalRevenue]));
+      rows.forEach(row => { row.revenue = revenueByDimension.get(`${row.sourceMedium}\u0000${row.sessionCampaign}`) ?? 0; });
+    } catch (error) {
+      console.warn(`GA detail totalRevenue fallback: ${error.message}`);
+    }
+  }
+  return rows;
+}
+
 async function getGaPurchaseCampaigns({ business, startDate, endDate }) {
   const accessToken = await getGoogleAccessToken('https://www.googleapis.com/auth/bigquery.readonly');
   const query = `WITH purchase_events AS (
     SELECT
       COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '') AS campaign_name,
-      IF(STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), 'MKT') > 0, 'MKT', 'PERF') AS business,
+      CASE
+        WHEN STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), 'MKT') > 0 THEN 'MKT'
+        WHEN STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), '_EC_') > 0
+          OR STRPOS(UPPER(COALESCE(session_traffic_source_last_click.cross_channel_campaign.campaign_name, '')), 'PERF') > 0 THEN 'PERF'
+        ELSE NULL
+      END AS business,
       ecommerce.purchase_revenue AS purchase_revenue
     FROM \`planar-method-169102.analytics_496808362.events_*\`
     WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date) AND FORMAT_DATE('%Y%m%d', @end_date)
@@ -827,7 +943,8 @@ async function getGaPurchaseCampaigns({ business, startDate, endDate }) {
   )
   SELECT campaign_name, COUNT(*) AS purchases, COALESCE(SUM(purchase_revenue), 0) AS revenue
   FROM purchase_events
-  WHERE campaign_name != ''
+  WHERE business IS NOT NULL
+    AND campaign_name != ''
     AND LOWER(TRIM(campaign_name)) NOT IN (
       '(direct)', 'direct', '(referral)', 'referral', '(not set)', 'not set',
       '(organic)', 'organic', '(none)', 'none', '(unassigned)', 'unassigned'
@@ -984,6 +1101,7 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
     const requestedBusiness = url.searchParams.get('business') || 'all';
     const business = ['all', 'MKT', 'PERF'].includes(requestedBusiness) ? requestedBusiness : 'all';
+    const useGaTotalRevenue = url.searchParams.get('revenueSource') === 'ga4';
     const startDate = url.searchParams.get('start');
     const endDate = url.searchParams.get('end');
     const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '');
@@ -993,7 +1111,7 @@ const server = createServer(async (request, response) => {
       return;
     }
     try {
-      const result = await getOverviewMetrics({ business, startDate, endDate });
+      const result = await getOverviewMetrics({ business, startDate, endDate, useGaTotalRevenue });
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify({ business, startDate, endDate, ...result }));
     } catch (error) {
@@ -1044,6 +1162,30 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify({ business, startDate, endDate, campaigns }));
     } catch (error) {
       console.error(`GA purchase campaigns error: ${error.message}`);
+      response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ error: error.message }));
+    }
+    return;
+  }
+  if (pathname === '/api/ga-detail') {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const requestedBusiness = url.searchParams.get('business') || 'all';
+    const business = ['all', 'MKT', 'PERF'].includes(requestedBusiness) ? requestedBusiness : 'all';
+    const useGaTotalRevenue = url.searchParams.get('revenueSource') === 'ga4';
+    const startDate = url.searchParams.get('start');
+    const endDate = url.searchParams.get('end');
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '');
+    if (!validDate(startDate) || !validDate(endDate)) {
+      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: '조회 기간이 올바르지 않습니다.' }));
+      return;
+    }
+    try {
+      const rows = await getGaDetailData({ business, startDate, endDate, useGaTotalRevenue });
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({ business, startDate, endDate, rows }));
+    } catch (error) {
+      console.error(`GA detail error: ${error.message}`);
       response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify({ error: error.message }));
     }
