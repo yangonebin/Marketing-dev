@@ -4,6 +4,7 @@ import { getAvailableMedia, parseHistoryRows, parseMediaMixRows, parseMediaMixTa
 import { extname, join, normalize } from 'node:path';
 import { randomUUID, sign } from 'node:crypto';
 import { getCampaignYoy } from './campaign-yoy.js';
+import { createAccounts, createAuth, validateCredentials } from './auth.js';
 
 function getPort(args = process.argv.slice(2), environment = process.env) {
   const portFlagIndex = args.findIndex(argument =>
@@ -30,6 +31,10 @@ function getHost(args = process.argv.slice(2)) {
 const port = getPort();
 const host = getHost();
 const root = process.cwd();
+const auth = createAuth();
+const accounts = createAccounts(join(root, '.dashboard-data', 'accounts.json'));
+const credentialsFile = join(root, '.dashboard-data', 'google-credentials.json');
+const getCredentialsPath = () => existsSync(credentialsFile) ? credentialsFile : process.env.GOOGLE_APPLICATION_CREDENTIALS;
 const creativeDataRoot = process.env.DASHBOARD_UPLOAD_DIR || join(root, '.dashboard-data');
 const creativeImageRoot = join(creativeDataRoot, 'creatives');
 const creativeMetadataPath = join(creativeDataRoot, 'creatives.json');
@@ -89,8 +94,8 @@ let campaignCache = { expiresAt: 0, values: null };
 const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
 
 async function getGoogleAccessToken(scope = 'https://www.googleapis.com/auth/spreadsheets.readonly') {
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (!credentialsPath) throw new Error('GOOGLE_APPLICATION_CREDENTIALS 환경변수가 설정되지 않았습니다.');
+  const credentialsPath = getCredentialsPath();
+  if (!credentialsPath) throw new Error('연결 설정에서 서비스 계정 JSON 파일을 등록해 주세요.');
 
   const credentials = JSON.parse(readFileSync(credentialsPath, 'utf8'));
   const issuedAt = Math.floor(Date.now() / 1000);
@@ -973,7 +978,70 @@ async function getGaPurchaseCampaigns({ business, startDate, endDate }) {
 }
 
 const server = createServer(async (request, response) => {
-  const pathname = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname);
+  let pathname;
+  try { pathname = decodeURIComponent(new URL(request.url, `http://${request.headers.host}`).pathname); }
+  catch { response.writeHead(400); response.end(); return; }
+  response.setHeader('Cache-Control', 'no-store');
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  const json = (status, data) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(data)); };
+  const cookie = (value, age) => `dashboard_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}${request.socket.encrypted || process.env.DASHBOARD_SECURE_COOKIE === 'true' ? '; Secure' : ''}`;
+  if (!['GET', 'HEAD'].includes(request.method)) {
+    let crossOrigin = request.headers['sec-fetch-site'] === 'cross-site';
+    if (request.headers.origin) {
+      try { crossOrigin ||= new URL(request.headers.origin).host !== request.headers.host; } catch { crossOrigin = true; }
+    }
+    if (crossOrigin) { json(403, { error: '허용되지 않은 요청입니다.' }); return; }
+  }
+  if (pathname === '/api/login') {
+    if (request.method !== 'POST') { json(405, { error: '허용되지 않은 요청입니다.' }); return; }
+    if (!auth.allowed(request.socket.remoteAddress)) { json(429, { error: '잠시 후 다시 시도해 주세요.' }); return; }
+    try {
+      const body = await readJsonBody(request, 4096);
+      const user = accounts.authenticate(body?.username, body?.password);
+      if (!user) { json(401, { error: 'ID 또는 비밀번호를 확인해 주세요.' }); return; }
+      response.setHeader('Set-Cookie', cookie(auth.login(request, user), 8 * 3600));
+      json(200, { ok: true });
+    } catch { json(400, { error: '로그인 요청을 확인해 주세요.' }); }
+    return;
+  }
+  const publicFiles = new Set(['/login', '/login.html', '/account.css', '/account.js', '/assets/blackyak-modern-logo.png']);
+  if (!publicFiles.has(pathname) && !auth.authenticated(request)) {
+    if (pathname.startsWith('/api/')) json(401, { error: '로그인이 필요합니다.' });
+    else { response.writeHead(302, { Location: '/login' }); response.end(); }
+    return;
+  }
+  if (pathname === '/api/logout') {
+    if (request.method !== 'POST') { json(405, { error: '허용되지 않은 요청입니다.' }); return; }
+    auth.logout(request); response.setHeader('Set-Cookie', cookie('', 0)); json(200, { ok: true }); return;
+  }
+  if (pathname === '/api/credentials') {
+    if (request.method === 'GET') { const path = getCredentialsPath(); json(200, { configured: Boolean(path && existsSync(path)) }); return; }
+    if (request.method !== 'POST') { json(405, { error: '허용되지 않은 요청입니다.' }); return; }
+    let credentials;
+    try { credentials = validateCredentials(await readJsonBody(request, 65536)); }
+    catch { json(400, { error: '올바른 서비스 계정 JSON 파일을 선택해 주세요.' }); return; }
+    try {
+      mkdirSync(join(root, '.dashboard-data'), { recursive: true });
+      writeFileSync(credentialsFile, JSON.stringify(credentials), { encoding: 'utf8', mode: 0o600 });
+      campaignCache = { expiresAt: 0, values: null };
+      json(200, { ok: true });
+    } catch { json(500, { error: '인증 파일을 저장하지 못했습니다. 서버 저장 권한을 확인해 주세요.' }); }
+    return;
+  }
+  if (pathname === '/api/account') {
+    const user = auth.user(request);
+    if (request.method === 'GET') { json(200, { username: accounts.find(user)?.username }); return; }
+    if (request.method !== 'POST') { json(405, { error: '허용되지 않은 요청입니다.' }); return; }
+    if (!auth.allowed(request.socket.remoteAddress)) { json(429, { error: '잠시 후 다시 시도해 주세요.' }); return; }
+    try {
+      const body = await readJsonBody(request, 4096);
+      accounts.update(user, body.currentPassword, body.username, body.password);
+      auth.revoke(user);
+      response.setHeader('Set-Cookie', cookie('', 0));
+      json(200, { ok: true });
+    } catch (error) { json(400, { error: error.message }); }
+    return;
+  }
   if (pathname === '/api/campaign-creatives') {
     const url = new URL(request.url, `http://${request.headers.host}`);
     if (request.method === 'GET') {
@@ -1266,7 +1334,10 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
-  const requestedPath = pathname === '/' ? 'index.html' : pathname.slice(1);
+  const requestedPath = pathname === '/' ? 'index.html' : pathname === '/login' ? 'login.html' : pathname.slice(1);
+  const publicAssets = /^assets\/[a-zA-Z0-9_-]+\.(png|jpg|jpeg|svg|webp|gif)$/.test(requestedPath);
+  const frontendFiles = new Set(['index.html', 'login.html', 'styles.css', 'account.css', 'account.js', 'app.js', 'metrics.js', 'campaign-filters.js', 'date-ranges.js']);
+  if (!frontendFiles.has(requestedPath) && !publicAssets) { response.writeHead(404); response.end('Not found'); return; }
   const filePath = normalize(join(root, requestedPath));
 
   if (!filePath.startsWith(root) || !existsSync(filePath) || !statSync(filePath).isFile()) {
