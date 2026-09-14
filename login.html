@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>로그인 · BLACKYAK</title><link rel="stylesheet" href="/account.css"></head>
+<body class="login-page"><main class="login-card">
+  <img src="/assets/blackyak-modern-logo.png" alt="BLACKYAK" class="login-logo">
+  <h1>대시보드 로그인</h1>
+  <form id="login-form">
+    <label for="username">ID</label><input id="username" name="username" autocomplete="username" required maxlength="100" autofocus>
+    <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+    <p id="login-error" role="alert"></p><button type="submit">로그인</button>
+  </form>
+</main><script src="/account.js" defer></script></body></html>
