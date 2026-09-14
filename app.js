@@ -52,14 +52,22 @@ const readJsonResponse = async response => {
   return { error: message };
 };
 const campaignKpiDefinitions = [
-  { key: 'impressions', label: '노출수', goal: 92, yoy: 108 }, { key: 'clicks', label: '클릭수', goal: 86, yoy: 104 }, { key: 'views', label: '조회수', goal: 78, yoy: 112 },
-  { key: 'cost', label: '비용', goal: 81, yoy: 96 }, { key: 'conversions', label: '구매(GA)', goal: 88, yoy: 109 }, { key: 'revenue', label: '매출액(GA)', goal: 95, yoy: 118 }, { key: 'sessions', label: '세션수', comparison: false },
-  { key: 'cpm', label: 'CPM', goal: 84, yoy: 103 }, { key: 'ctr', label: 'CTR', goal: 91, yoy: 106 }, { key: 'cpv', label: 'CPV', goal: 76, yoy: 98 },
-  { key: 'purchaseRate', label: '구매전환율(GA)', goal: 87, yoy: 111 }, { key: 'cpo', label: 'CPO', goal: 82, yoy: 94 }, { key: 'roas', label: 'ROAS', goal: 97, yoy: 121 }, { key: 'users', label: '총 사용자수', comparison: false },
+  { key: 'impressions', label: '노출수', goal: 92 }, { key: 'clicks', label: '클릭수', goal: 86 }, { key: 'views', label: '조회수', goal: 78 },
+  { key: 'cost', label: '비용', goal: 81 }, { key: 'conversions', label: '구매(GA)', goal: 88, yoy: false }, { key: 'revenue', label: '매출액(GA)', goal: 95, yoy: false }, { key: 'sessions', label: '세션수', comparison: false },
+  { key: 'cpm', label: 'CPM', goal: 84 }, { key: 'ctr', label: 'CTR', goal: 91 }, { key: 'cpv', label: 'CPV', goal: 76 },
+  { key: 'purchaseRate', label: '구매전환율(GA)', goal: 87, yoy: false }, { key: 'cpo', label: 'CPO', goal: 82, yoy: false }, { key: 'roas', label: 'ROAS', goal: 97, yoy: false }, { key: 'users', label: '총 사용자수', comparison: false },
 ];
-const campaignKpiComparison = definition => definition.comparison === false
-  ? ''
-  : `<small class="${definition.goal >= 100 ? 'positive' : 'negative'}"><b>${definition.goal >= 100 ? '▲' : '▼'} ${definition.goal}%</b> 목표 대비</small><small class="${definition.yoy >= 100 ? 'positive' : 'negative'}"><b>${definition.yoy >= 100 ? '▲' : '▼'} ${definition.yoy}%</b> YoY 대비</small>`;
+const campaignKpiComparison = (definition, currentValue, baseline) => {
+  if (definition.comparison === false) return '';
+  const goal = '<small class="' + (definition.goal >= 100 ? 'positive' : 'negative') + '"><b>' + (definition.goal >= 100 ? '▲' : '▼') + ' ' + definition.goal + '%</b> 목표 대비</small>';
+  if (definition.yoy === false) return goal;
+  if (!Number.isFinite(currentValue) || !Number.isFinite(baseline) || baseline <= 0) {
+    return goal + '<small class="actual-data">비교 데이터 없음 · YoY 대비</small>';
+  }
+  const change = (currentValue / baseline - 1) * 100;
+  const favorable = ['cost', 'cpm', 'cpv', 'cpo'].includes(definition.key) ? change <= 0 : change >= 0;
+  return goal + '<small title="선택 기간·필터 실적과 YoY 데이터 시트의 캠페인 전체 기준값 비교" class="' + (favorable ? 'positive' : 'negative') + '"><b>' + (change > 0 ? '▲' : change < 0 ? '▼' : '') + ' ' + Math.abs(change).toFixed(1) + '%</b> YoY 대비</small>';
+};
 const trendColors = ['#48d9ff', '#ff8ca2', '#a99eff'];
 let selectedTrendMetrics = ['cost', 'revenue'];
 let trendTimeUnit = 'daily';
@@ -251,7 +259,7 @@ async function loadCampaignMediaMetrics() {
       card.classList.remove('loading', 'load-error');
       card.querySelector('strong').textContent = format(key, result.metrics[key]);
       const definition = campaignKpiDefinitions.find(item => item.key === key);
-      card.querySelector('.kpi-progress').innerHTML = campaignKpiComparison(definition);
+      card.querySelector('.kpi-progress').innerHTML = campaignKpiComparison(definition, result.metrics[key], result.yoy?.metrics?.[key]);
     });
     renderCampaignTrend(result.trend);
     latestWeeklyGaRows = result.weeklyGa;
@@ -599,13 +607,13 @@ function updateCampaignDrilldown(level = 'campaign') {
   const campaign = document.querySelector('#campaign-select').value;
   if (level === 'campaign' && campaignFilterRows.length) {
     const businesses = getAvailableBusinesses(campaignFilterRows, campaign);
-    businessSelect.innerHTML = businesses.map(business => {
+    businessSelect.innerHTML = '<option value="all">통합</option>' + businesses.map(business => {
       const option = document.createElement('option');
       option.value = business;
       option.textContent = business;
       return option.outerHTML;
     }).join('');
-    businessSelect.value = businesses.includes(previousBusiness) ? previousBusiness : businesses[0] ?? '';
+    businessSelect.value = businesses.includes(previousBusiness) ? previousBusiness : 'all';
     businessSelect.disabled = businesses.length === 0;
   }
   const business = businessSelect.value;

@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { getAvailableMedia, parseHistoryRows, parseMediaMixRows, parseMediaMixTable, selectMediaMixColumns } from './campaign-filters.js';
 import { extname, join, normalize } from 'node:path';
 import { randomUUID, sign } from 'node:crypto';
+import { getCampaignYoy } from './campaign-yoy.js';
 
 function getPort(args = process.argv.slice(2), environment = process.env) {
   const portFlagIndex = args.findIndex(argument =>
@@ -81,7 +82,7 @@ function readJsonBody(request, maxBytes = 12 * 1024 * 1024) {
 
 const campaignSheet = {
   spreadsheetId: '1IP9rWvILocygHodSTiDxc5TDKB7LNnLJJNVJFTGlXN4',
-  ranges: ["'미디어믹스'!A:AA", "'UTM 누적(26FW~)'!F3:V26", "'UTM 누적(26FW~)'!F46:AE1018", "'히스토리'!A:Z"],
+  ranges: ["'미디어믹스'!A:AA", "'UTM 누적(26FW~)'!F3:V26", "'UTM 누적(26FW~)'!F46:AE1018", "'히스토리'!A:Z", "'YoY 데이터'!A:I"],
 };
 let campaignCache = { expiresAt: 0, values: null };
 
@@ -153,7 +154,7 @@ async function getCampaignFilters() {
   const sheetResult = await sheetResponse.json();
   if (!sheetResponse.ok) throw new Error(`Google Sheets 조회 실패 (${sheetResponse.status})`);
 
-  const [mediaMixRows = [], utmIndexRows = [], utmRows = [], rawHistoryRows = []] = (sheetResult.valueRanges ?? []).map(item => item.values ?? []);
+  const [mediaMixRows = [], utmIndexRows = [], utmRows = [], rawHistoryRows = [], yoyRows = []] = (sheetResult.valueRanges ?? []).map(item => item.values ?? []);
   const { campaigns, mediaAdTypes, filterRows } = parseMediaMixRows(mediaMixRows);
   const mediaMixTable = parseMediaMixTable(mediaMixRows);
   const historyRows = parseHistoryRows(rawHistoryRows);
@@ -171,7 +172,7 @@ async function getCampaignFilters() {
     if (mapping.has(label) && segments.length >= 2) mapping.get(label).add(`_${segments.at(-2)}_${segments.at(-1)}`.toUpperCase());
   });
   const mediaFilters = Object.fromEntries([...mapping].map(([label, needles]) => [label, [...needles]]));
-  const values = { campaigns, mediaAdTypes, filterRows, mediaFilters, historyRows, mediaMixTable };
+  const values = { campaigns, mediaAdTypes, filterRows, mediaFilters, historyRows, mediaMixTable, yoyRows };
   campaignCache = { expiresAt: Date.now() + 5 * 60 * 1000, values };
   return values;
 }
@@ -1223,7 +1224,8 @@ const server = createServer(async (request, response) => {
       const mediaNeedles = [...new Set(mediaAdTypes.flatMap(value => filters.mediaFilters[value] ?? []))];
       const { metrics, trend, weeklyGa } = await getCampaignMediaMetrics({ campaign, business, mediaAdTypes, mediaNeedles, startDate, endDate });
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-      response.end(JSON.stringify({ campaign, business, mediaAdTypes, startDate, endDate, metrics, trend, weeklyGa }));
+      const yoy = getCampaignYoy(filters.yoyRows, campaign);
+      response.end(JSON.stringify({ campaign, business, mediaAdTypes, startDate, endDate, metrics, trend, weeklyGa, yoy }));
     } catch (error) {
       console.error(`Campaign media metrics error: ${error.message}`);
       response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
