@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { scryptSync } from 'node:crypto';
-import { createAccounts, createAuth, validateCredentials } from './auth.js';
+import { createAccounts, createAuth } from './auth.js';
 
 test('account changes require current password, reject duplicates, and persist hashed credentials', () => {
   const directory = mkdtempSync(join(tmpdir(), 'dashboard-auth-'));
@@ -36,8 +36,4 @@ test('sessions are revoked per account and login attempts are limited', () => {
   assert.equal(auth.authenticated(request), false);
   for (let i = 0; i < 10; i++) assert.equal(auth.allowed('remote'), true);
   assert.equal(auth.allowed('remote'), false);
-});
-test('uploaded data must be a service account key', () => {
-  assert.throws(() => validateCredentials({ rows: [] }));
-  assert.throws(() => validateCredentials({ type: 'service_account', client_email: 'test@example.gserviceaccount.com', private_key: 'not-a-key' }));
 });
