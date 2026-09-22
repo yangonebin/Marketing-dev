@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual, createPrivateKey } from 'node:crypto';
+import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -25,12 +25,6 @@ export function createAccounts(path) {
       accounts = updated;
     },
   };
-}
-export function validateCredentials(value) {
-  if (!value || value.type !== 'service_account' || typeof value.client_email !== 'string'
-    || !value.client_email.endsWith('.gserviceaccount.com') || typeof value.private_key !== 'string'
-    || createPrivateKey(value.private_key).asymmetricKeyType !== 'rsa') throw new Error('invalid');
-  return value;
 }
 export function createAuth() {
   const sessions = new Map();

@@ -4,7 +4,7 @@ import { getAvailableMedia, parseHistoryRows, parseMediaMixRows, parseMediaMixTa
 import { extname, join, normalize } from 'node:path';
 import { randomUUID, sign } from 'node:crypto';
 import { getCampaignYoy } from './campaign-yoy.js';
-import { createAccounts, createAuth, validateCredentials } from './auth.js';
+import { createAccounts, createAuth } from './auth.js';
 
 function getPort(args = process.argv.slice(2), environment = process.env) {
   const portFlagIndex = args.findIndex(argument =>
@@ -34,7 +34,7 @@ const root = process.cwd();
 const auth = createAuth();
 const accounts = createAccounts(join(root, '.dashboard-data', 'accounts.json'));
 const credentialsFile = join(root, '.dashboard-data', 'google-credentials.json');
-const getCredentialsPath = () => existsSync(credentialsFile) ? credentialsFile : process.env.GOOGLE_APPLICATION_CREDENTIALS;
+const getCredentialsPath = () => process.env.GOOGLE_APPLICATION_CREDENTIALS || (existsSync(credentialsFile) ? credentialsFile : null);
 const creativeDataRoot = process.env.DASHBOARD_UPLOAD_DIR || join(root, '.dashboard-data');
 const creativeImageRoot = join(creativeDataRoot, 'creatives');
 const creativeMetadataPath = join(creativeDataRoot, 'creatives.json');
@@ -95,7 +95,16 @@ const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url')
 
 async function getGoogleAccessToken(scope = 'https://www.googleapis.com/auth/spreadsheets.readonly') {
   const credentialsPath = getCredentialsPath();
-  if (!credentialsPath) throw new Error('연결 설정에서 서비스 계정 JSON 파일을 등록해 주세요.');
+  if (!credentialsPath) {
+    // Cloud Run supplies short lived tokens for its runtime service account.
+    const metadata = await fetch(`http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token?scopes=${encodeURIComponent(scope)}`, {
+      headers: { 'Metadata-Flavor': 'Google' },
+    });
+    if (!metadata.ok) throw new Error('Google 서비스 계정 인증을 확인해 주세요.');
+    const result = await metadata.json();
+    if (!result.access_token) throw new Error('Google 서비스 계정 토큰을 받지 못했습니다.');
+    return result.access_token;
+  }
 
   const credentials = JSON.parse(readFileSync(credentialsPath, 'utf8'));
   const issuedAt = Math.floor(Date.now() / 1000);
@@ -1016,16 +1025,7 @@ const server = createServer(async (request, response) => {
   }
   if (pathname === '/api/credentials') {
     if (request.method === 'GET') { const path = getCredentialsPath(); json(200, { configured: Boolean(path && existsSync(path)) }); return; }
-    if (request.method !== 'POST') { json(405, { error: '허용되지 않은 요청입니다.' }); return; }
-    let credentials;
-    try { credentials = validateCredentials(await readJsonBody(request, 65536)); }
-    catch { json(400, { error: '올바른 서비스 계정 JSON 파일을 선택해 주세요.' }); return; }
-    try {
-      mkdirSync(join(root, '.dashboard-data'), { recursive: true });
-      writeFileSync(credentialsFile, JSON.stringify(credentials), { encoding: 'utf8', mode: 0o600 });
-      campaignCache = { expiresAt: 0, values: null };
-      json(200, { ok: true });
-    } catch { json(500, { error: '인증 파일을 저장하지 못했습니다. 서버 저장 권한을 확인해 주세요.' }); }
+    json(405, { error: '허용되지 않은 요청입니다.' });
     return;
   }
   if (pathname === '/api/account') {

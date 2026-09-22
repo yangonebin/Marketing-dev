@@ -1,1 +1,6 @@
 .dashboard-data/
+.env
+.env.local
+credentials.json
+service-account*.json
+secrets/
