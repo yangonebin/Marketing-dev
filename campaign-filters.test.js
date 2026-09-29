@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getAvailableBusinesses, getAvailableMedia, parseHistoryRows, parseMediaMixRows, parseMediaMixTable, selectMediaMixColumns } from './campaign-filters.js';
+import { getAvailableBusinesses, getAvailableMedia, matchCreativeTerm, parseHistoryRows, parseMediaMixRows, parseMediaMixTable, selectMediaMixColumns } from './campaign-filters.js';
+
+test('GA UTM term은 소재명 완전 일치를 우선하고 없을 때 마지막 구간만 제외한다', () => {
+  assert.equal(matchCreativeTerm('IMG_Stonemaster_F_260916-bin', ['IMG_Stonemaster_F']), 'IMG_Stonemaster_F');
+  assert.equal(matchCreativeTerm('IMG_Stonemaster_F_260916-bin', ['IMG_Stonemaster_F', 'IMG_Stonemaster_F_260916-bin']), 'IMG_Stonemaster_F_260916-bin');
+  assert.equal(matchCreativeTerm('IMG_Stonemaster_F_260916-bin', ['IMG_Stonemaster']), null);
+  assert.equal(matchCreativeTerm('IMG_Stonemaster_F', ['IMG_Stonemaster_F']), 'IMG_Stonemaster_F');
+});
 
 test('미디어믹스에서 사업부, 캠페인, Media - AD Type만 정리한다', () => {
   const result = parseMediaMixRows([

@@ -55,6 +55,16 @@ export function getAvailableBusinesses(filterRows, campaign = 'all') {
     .map(row => row.business))];
 }
 
+export function matchCreativeTerm(utmTerm, creativeNames) {
+  const term = String(utmTerm ?? '').trim();
+  const names = new Set(creativeNames.map(name => String(name ?? '').split('(')[0].trim()).filter(Boolean));
+  if (names.has(term)) return term;
+  const lastSeparator = term.lastIndexOf('_');
+  if (lastSeparator < 1) return null;
+  const withoutLastPart = term.slice(0, lastSeparator);
+  return names.has(withoutLastPart) ? withoutLastPart : null;
+}
+
 export function parseHistoryRows(rows = []) {
   const clean = value => String(value ?? '').trim();
   const headerRowIndex = rows.findIndex(row => {

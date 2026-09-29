@@ -1,0 +1,34 @@
+{"kind":"deck","id":"pr/k620zl","name":"Deck"}
+{"kind":"layout","layoutId":"38203b0b-1e6f-4a44-9788-0bc956bd1a87","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"d2d6e0f1-04ad-4111-84cf-f4b942f24292","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/3syiri","slide":1,"title":"초기 구축 전, 마케터가 준비할 것","textShapes":13}
+{"kind":"textbox","id":"sh/hof69czi","slide":1,"text":"초기 구축 전, 마케터가 준비할 것","textPreview":"초기 구축 전, 마케터가 준비할 것","textChars":19,"textLines":1,"bbox":[70,48,1140,72]}
+{"kind":"textbox","id":"sh/ulonehgr","slide":1,"text":"기존 보고서 한 개를 기준으로 필요한 정보와 데이터 위치를 정리합니다.","textPreview":"기존 보고서 한 개를 기준으로 필요한 정보와 데이터 위치를 정리합니다.","textChars":39,"textLines":1,"bbox":[72,130,1136,42]}
+{"kind":"textbox","id":"sh/vmxo7mhc","slide":1,"text":"마케팅 대시보드 초기 구축   1 / 2","textPreview":"마케팅 대시보드 초기 구축   1 / 2","textChars":22,"textLines":1,"bbox":[72,671,1136,28]}
+{"kind":"textbox","id":"sh/8z65c7y1","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[72,205,65,52]}
+{"kind":"textbox","id":"sh/tkf65cz6","slide":1,"text":"보고 기준 정하기","textPreview":"보고 기준 정하기","textChars":9,"textLines":1,"bbox":[157,205,290,48]}
+{"kind":"textbox","id":"sh/6x4naxgv","slide":1,"text":"광고비·매출·ROAS 등 핵심 지표와\n기간·캠페인·매체별 조회 기준을 정합니다.","textPreview":"광고비·매출·ROAS 등 핵심 지표와 | 기간·캠페인·매체별 조회 기준을 정합니다.","textChars":44,"textLines":2,"bbox":[467,205,730,74]}
+{"kind":"textbox","id":"sh/7yd432hg","slide":1,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[72,325,65,52]}
+{"kind":"textbox","id":"sh/cvq5oby5","slide":1,"text":"원본 자료 모으기","textPreview":"원본 자료 모으기","textChars":9,"textLines":1,"bbox":[157,325,290,48]}
+{"kind":"textbox","id":"sh/dgz6hwfq","slide":1,"text":"기존 보고서, 구글 시트 링크와\nBigQuery의 광고 데이터 위치를 확인합니다.","textPreview":"기존 보고서, 구글 시트 링크와 | BigQuery의 광고 데이터 위치를 확인합니다.","textChars":45,"textLines":2,"bbox":[467,325,730,74]}
+{"kind":"textbox","id":"sh/hgzqdgz2","slide":1,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[72,445,65,52]}
+{"kind":"textbox","id":"sh/gfqp4byh","slide":1,"text":"조회 권한 확인하기","textPreview":"조회 권한 확인하기","textChars":10,"textLines":1,"bbox":[157,445,290,48]}
+{"kind":"textbox","id":"sh/fehob6hw","slide":1,"text":"데이터 담당자에게 조회 권한 설정을 요청하고,\n데이터 갱신 시점과 매출 기준을 확인합니다.","textPreview":"데이터 담당자에게 조회 권한 설정을 요청하고, | 데이터 갱신 시점과 매출 기준을 확인합니다.","textChars":50,"textLines":2,"bbox":[467,445,730,74]}
+{"kind":"textbox","id":"sh/udo721gb","slide":1,"text":"준비 결과: 보고서 예시 + 데이터 위치 + 지표 기준","textPreview":"준비 결과: 보고서 예시 + 데이터 위치 + 지표 기준","textChars":30,"textLines":1,"bbox":[72,580,1136,50]}
+{"kind":"notes","id":"nt/3syiri","slide":1,"text":"마케터가 먼저 할 일은 무엇을 볼지 정하고 원본 자료를 준비하는 것입니다. BigQuery는 광고 데이터가 저장된 곳입니다. 기존 데이터가 있는지와 갱신 시점을 담당자에게 확인합니다. 데이터가 없다면 수집과 적재 작업을 별도로 협의해야 합니다. 서비스 계정 등 기술적인 권한 설정은 담당자와 진행하며, 인증 키를 요청문에 붙여 넣지 않습니다. 매출은 광고 매체 기준인지 GA 기준인지 정합니다."}
+{"kind":"slide","id":"sl/smfmsi","slide":2,"title":"구축 과정에서 마케터가 할 일","textShapes":14}
+{"kind":"textbox","id":"sh/9g7udcfm","slide":2,"text":"구축 과정에서 마케터가 할 일","textPreview":"구축 과정에서 마케터가 할 일","textChars":16,"textLines":1,"bbox":[70,48,1140,72]}
+{"kind":"textbox","id":"sh/mtwvixwv","slide":2,"text":"AI에 업무 요구를 설명하고, 결과가 원본 데이터와 맞는지 확인합니다.","textPreview":"AI에 업무 요구를 설명하고, 결과가 원본 데이터와 맞는지 확인합니다.","textChars":39,"textLines":1,"bbox":[72,130,1136,42]}
+{"kind":"textbox","id":"sh/nu5cb2xg","slide":2,"text":"마케팅 대시보드 초기 구축   2 / 2","textPreview":"마케팅 대시보드 초기 구축   2 / 2","textChars":22,"textLines":1,"bbox":[72,671,1136,28]}
+{"kind":"textbox","id":"sh/wjydorex","slide":2,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[72,202,65,52]}
+{"kind":"textbox","id":"sh/xk7uhwfi","slide":2,"text":"첫 화면 요청하기","textPreview":"첫 화면 요청하기","textChars":9,"textLines":1,"bbox":[157,202,290,48]}
+{"kind":"textbox","id":"sh/ahgvmhw7","slide":2,"text":"원하는 지표와 화면 예시를 전달하고,\n핵심 화면부터 작게 만듭니다.","textPreview":"원하는 지표와 화면 예시를 전달하고, | 핵심 화면부터 작게 만듭니다.","textChars":37,"textLines":2,"bbox":[467,202,730,74]}
+{"kind":"textbox","id":"sh/bipcfmxs","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[72,307,65,52]}
+{"kind":"textbox","id":"sh/cnutcnet","slide":2,"text":"데이터 연결 요청하기","textPreview":"데이터 연결 요청하기","textChars":11,"textLines":1,"bbox":[157,307,290,48]}
+{"kind":"textbox","id":"sh/donu5sfe","slide":2,"text":"준비한 데이터 위치와 조회 조건을 전달해\n예시 숫자를 실제 데이터로 바꿉니다.","textPreview":"준비한 데이터 위치와 조회 조건을 전달해 | 예시 숫자를 실제 데이터로 바꿉니다.","textChars":43,"textLines":2,"bbox":[467,307,730,74]}
+{"kind":"textbox","id":"sh/l8zalo72","slide":2,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[72,412,65,52]}
+{"kind":"textbox","id":"sh/k76tsjqh","slide":2,"text":"숫자와 기능 검증하기","textPreview":"숫자와 기능 검증하기","textChars":11,"textLines":1,"bbox":[157,412,290,48]}
+{"kind":"textbox","id":"sh/jmxsjepw","slide":2,"text":"같은 기간의 원본 합계와 대조하고,\n필터·계산식·누락 여부를 확인해 수정 요청합니다.","textPreview":"같은 기간의 원본 합계와 대조하고, | 필터·계산식·누락 여부를 확인해 수정 요청합니다.","textChars":47,"textLines":2,"bbox":[467,412,730,74]}
+{"kind":"textbox","id":"sh/ylobq98b","slide":2,"text":"AI 요청문 예시","textPreview":"AI 요청문 예시","textChars":9,"textLines":1,"bbox":[72,536,1136,35]}
+{"kind":"textbox","id":"sh/tczup87y","slide":2,"text":"“선택한 기간의 매체별 광고비와 GA 매출을 보여줘.\n통합 ROAS는 전체 매출 ÷ 전체 광고비 × 100으로 계산해줘.”","textPreview":"“선택한 기간의 매체별 광고비와 GA 매출을 보여줘. | 통합 ROAS는 전체 매출 ÷ 전체 광고비 × 100으로 계산해줘.”","textChars":68,"textLines":2,"bbox":[72,578,1136,77]}
+{"kind":"notes","id":"nt/smfmsi","slide":2,"text":"요청문은 발표용 예시이며 실제 작업 당시의 기록은 아닙니다. 처음에는 예시 데이터로 화면을 확인하고 이후 실제 데이터를 연결할 수 있습니다. 연결 후에는 동일한 기간과 기준으로 원본 숫자를 대조해야 합니다. 오류를 발견하면 조회 기간, 캠페인 이름, 기대값과 실제값을 함께 전달합니다. 자동 테스트와 실제 데이터 검증을 마친 뒤 공용 테스트 환경에서 확인하고 서비스 반영을 진행합니다. 이 프로젝트는 work 브랜치에서 develop으로 검토를 요청하고, 검증 이후 Launcher를 통해 실제 서비스 반영을 검토합니다."}
