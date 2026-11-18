@@ -21,6 +21,7 @@
           <a href="#media-product-report"><span>02</span>매체 별 리포트</a>
           <a href="#ga-report"><span>03</span>GA 리포트</a>
           <a href="#campaign-report"><span>04</span>캠페인 리포트</a>
+          <a href="#test-report"><span>05</span>테스트 리포트</a>
         </nav>
 
         <div class="sidebar-status">
@@ -37,6 +38,7 @@
             <h1>SUMMARY</h1>
           </div>
           <div class="page-header-controls">
+          <span id="test-report-data-label" hidden>원본 엑셀 데이터</span>
           <label id="campaign-global-filter" class="campaign-primary-filter campaign-global-filter" hidden>
             <span>캠페인</span>
             <select id="campaign-select" disabled><option value="all">캠페인 불러오는 중…</option></select>
@@ -200,7 +202,7 @@
               <div class="campaign-title-row">
                 <h2 id="campaign-report-title">캠페인 성과 리포트</h2>
               </div>
-              <p class="panel-subtitle">캠페인별 핵심 성과를 비교하고 흐름을 확인하세요. · 목업 데이터</p>
+              <p id="campaign-summary-description" class="panel-subtitle">캠페인별 핵심 성과를 비교하고 흐름을 확인하세요. · 목업 데이터</p>
             </div>
             <div class="campaign-filters" aria-label="캠페인 리포트 필터">
               <label>사업부<select id="campaign-business"><option value="all" selected>통합</option><option value="MKT">MKT</option><option value="PERF">PERF</option></select></label>
@@ -231,7 +233,7 @@
           </div>
           <div id="campaign-media-tab" class="campaign-tab-panel media-data-report" hidden>
             <div class="media-report-header">
-              <div><p class="section-number">MEDIA DATA REPORT</p><h2>매체 데이터</h2><p class="panel-subtitle">매체별 성과를 요약·주차·일자 기준으로 확인하세요. · 목업 데이터</p></div>
+              <div><p class="section-number">MEDIA DATA REPORT</p><h2>매체 데이터</h2><p id="campaign-media-description" class="panel-subtitle">매체별 성과를 요약·주차·일자 기준으로 확인하세요. · 목업 데이터</p></div>
               <span class="media-report-badge">3 SECTIONS</span>
             </div>
 
@@ -243,8 +245,8 @@
               </div><section class="goal-kpi-scoreboard compact" aria-labelledby="goal-kpi-title"><div class="goal-kpi-heading"><div><p class="section-number">GOAL KPI GAP</p><h2 id="goal-kpi-title">목표별 KPI GAP</h2></div></div><div id="goal-kpi-grid" class="goal-kpi-grid"><p class="empty-state">목표별 KPI를 불러오는 중…</p></div></section></div>
               <div class="table-wrap"><table class="media-detail-table">
                 <thead>
-                  <tr class="media-group-head"><th colspan="5" class="attribute-group"><span>01</span>속성</th><th colspan="9" class="media-metric-group"><span>02</span>매체 데이터</th><th colspan="5" class="purchase-group"><span>03</span>구매 데이터</th></tr>
-                  <tr><th>사업부</th><th>목표</th><th>플랫폼</th><th>매체</th><th>기간</th><th>광고비</th><th>노출</th><th>클릭</th><th>조회</th><th>CPM</th><th>CPC</th><th>CPV</th><th>CTR</th><th>VTR</th><th>구매수</th><th>총수익</th><th>CPO</th><th>CVR</th><th>ROAS</th></tr>
+                  <tr class="media-group-head"><th colspan="5" class="attribute-group"><span>01</span>속성</th><th colspan="9" class="media-metric-group"><span>02</span>매체 데이터</th><th colspan="5" class="purchase-group"><span>03</span>구매 데이터</th><th colspan="5" scope="colgroup" class="ga-conversion-group test-report-column"><span>04</span>GA 전환 데이터</th></tr>
+                  <tr><th>사업부</th><th>목표</th><th>플랫폼</th><th>매체</th><th>기간</th><th>광고비</th><th>노출</th><th>클릭</th><th>조회</th><th>CPM</th><th>CPC</th><th>CPV</th><th>CTR</th><th>VTR</th><th>구매수</th><th>총수익</th><th>CPO</th><th>CVR</th><th>ROAS</th><th scope="col" class="ga-conversion-cell test-report-column">구매수</th><th scope="col" class="ga-conversion-cell test-report-column">총수익</th><th scope="col" class="ga-conversion-cell test-report-column">CPO</th><th scope="col" class="ga-conversion-cell test-report-column">CVR</th><th scope="col" class="ga-conversion-cell test-report-column">ROAS</th></tr>
                 </thead>
                 <tbody id="campaign-media-detail-body"><tr><td colspan="19" class="empty-state">매체 데이터를 불러오는 중…</td></tr></tbody>
               </table></div>
@@ -256,9 +258,9 @@
             </article>
 
             <article class="panel media-daily-panel">
-              <div class="panel-heading"><div><p class="section-number">03 · DAILY MEDIA PERFORMANCE</p><h2>일자별 매체 성과</h2><p class="panel-subtitle">전일까지의 실제 일자별 성과</p></div><div class="media-mini-legend"><span><i style="background:#48d9ff"></i>광고비</span><span><i style="background:#ff8ca2"></i>매출</span></div></div>
+              <div class="panel-heading"><div><p class="section-number">03 · DAILY MEDIA PERFORMANCE</p><h2>일자별 매체 성과</h2><p id="campaign-daily-description" class="panel-subtitle">전일까지의 실제 일자별 성과</p></div><div class="media-mini-legend"><span><i style="background:#48d9ff"></i>광고비</span><span><i style="background:#ff8ca2"></i>매출</span></div></div>
               <div id="campaign-media-daily-chart" class="media-daily-timeseries" aria-label="일자별 광고비와 매출 시계열 그래프"><p class="empty-state">일자별 그래프를 불러오는 중…</p></div>
-              <div class="table-wrap"><table class="media-detail-table media-daily-table"><thead><tr class="media-group-head"><th colspan="1" class="attribute-group"><span>01</span>속성</th><th colspan="9" class="media-metric-group"><span>02</span>매체 데이터</th><th colspan="5" class="purchase-group"><span>03</span>구매 데이터</th></tr><tr><th>일자</th><th>광고비</th><th>노출</th><th>클릭</th><th>조회</th><th>CPM</th><th>CPC</th><th>CPV</th><th>CTR</th><th>VTR</th><th>구매수</th><th>총수익</th><th>CPO</th><th>CVR</th><th>ROAS</th></tr></thead><tbody id="campaign-media-daily-body"><tr><td colspan="15" class="empty-state">일자별 데이터를 불러오는 중…</td></tr></tbody></table></div>
+              <div class="table-wrap"><table class="media-detail-table media-daily-table"><thead><tr class="media-group-head"><th colspan="1" class="attribute-group"><span>01</span>속성</th><th colspan="9" class="media-metric-group"><span>02</span>매체 데이터</th><th colspan="5" class="purchase-group"><span>03</span>구매 데이터</th><th colspan="5" scope="colgroup" class="ga-conversion-group test-report-column"><span>04</span>GA 전환 데이터</th></tr><tr><th>일자</th><th>광고비</th><th>노출</th><th>클릭</th><th>조회</th><th>CPM</th><th>CPC</th><th>CPV</th><th>CTR</th><th>VTR</th><th>구매수</th><th>총수익</th><th>CPO</th><th>CVR</th><th>ROAS</th><th scope="col" class="ga-conversion-cell test-report-column">구매수</th><th scope="col" class="ga-conversion-cell test-report-column">총수익</th><th scope="col" class="ga-conversion-cell test-report-column">CPO</th><th scope="col" class="ga-conversion-cell test-report-column">CVR</th><th scope="col" class="ga-conversion-cell test-report-column">ROAS</th></tr></thead><tbody id="campaign-media-daily-body"><tr><td colspan="15" class="empty-state">일자별 데이터를 불러오는 중…</td></tr></tbody></table></div>
             </article>
           </div>
           <div id="campaign-creative-tab" class="campaign-tab-panel campaign-creative-report" hidden>

@@ -4,6 +4,7 @@ import { getAvailableMedia, parseHistoryRows, parseMediaMixRows, parseMediaMixTa
 import { extname, join, normalize } from 'node:path';
 import { randomUUID, sign } from 'node:crypto';
 import { getCampaignYoy } from './campaign-yoy.js';
+import { classifyReport, createReportSource, reportMediaTable, reportOptions, reportSummary } from './campaign-workbook.js';
 import { createAccounts, createAuth } from './auth.js';
 
 function getPort(args = process.argv.slice(2), environment = process.env) {
@@ -190,6 +191,18 @@ async function getCampaignFilters() {
   campaignCache = { expiresAt: Date.now() + 5 * 60 * 1000, values };
   return values;
 }
+
+const getReportRecords = createReportSource(getGoogleAccessToken);
+let mappedReport;
+async function getTestReport(filters) {
+  const records = await getReportRecords();
+  if (mappedReport?.records !== records || mappedReport?.filters !== filters) {
+    mappedReport = { records, filters, report: classifyReport(records, filters) };
+  }
+  return mappedReport.report;
+}
+
+const reportYesterday = () => new Date(Date.now() + 9 * 3600000 - 86400000).toISOString().slice(0, 10);
 
 async function getCampaignMediaTable({ campaign }) {
   const filters = await getCampaignFilters();
@@ -1260,9 +1273,12 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
-  if (pathname === '/api/campaigns') {
+  if (pathname === '/api/campaigns' || pathname === '/api/test-report-campaigns') {
     try {
-      const { campaigns, mediaAdTypes, filterRows } = await getCampaignFilters();
+      const filters = await getCampaignFilters();
+      const { campaigns, mediaAdTypes, filterRows } = pathname === '/api/test-report-campaigns'
+        ? reportOptions(await getTestReport(filters))
+        : filters;
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify({ campaigns, mediaAdTypes, filterRows }));
     } catch (error) {
@@ -1272,11 +1288,13 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
-  if (pathname === '/api/campaign-media-metrics') {
+  if (pathname === '/api/campaign-media-metrics' || pathname === '/api/test-report-metrics') {
     const url = new URL(request.url, `http://${request.headers.host}`);
     const campaign = url.searchParams.get('campaign')?.trim() || 'all';
     const requestedBusiness = url.searchParams.get('business') || 'all';
-    const business = ['all', 'MKT', 'PERF'].includes(requestedBusiness) ? requestedBusiness : 'all';
+    const testMode = pathname === '/api/test-report-metrics';
+    const businesses = testMode ? ['all', 'MKT', 'PERF', '미분류'] : ['all', 'MKT', 'PERF'];
+    const business = businesses.includes(requestedBusiness) ? requestedBusiness : 'all';
     const startDate = url.searchParams.get('start');
     const endDate = url.searchParams.get('end');
     const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '');
@@ -1287,10 +1305,14 @@ const server = createServer(async (request, response) => {
     }
     try {
       const filters = await getCampaignFilters();
-      const availableMedia = getAvailableMedia(filters.filterRows, campaign, business);
+      const testReport = testMode ? await getTestReport(filters) : null;
+      const availableMedia = getAvailableMedia(testReport ? reportOptions(testReport).filterRows : filters.filterRows, campaign, business);
       const mediaAdTypes = (url.searchParams.get('media') ?? '').split(',').filter(value => availableMedia.includes(value));
       const mediaNeedles = [...new Set(mediaAdTypes.flatMap(value => filters.mediaFilters[value] ?? []))];
-      const { metrics, trend, weeklyGa } = await getCampaignMediaMetrics({ campaign, business, mediaAdTypes, mediaNeedles, startDate, endDate });
+      const cutoff = reportYesterday();
+      const { metrics, trend, weeklyGa } = testReport
+        ? reportSummary(testReport.records, { campaign, business, mediaAdTypes, startDate, endDate: endDate < cutoff ? endDate : cutoff })
+        : await getCampaignMediaMetrics({ campaign, business, mediaAdTypes, mediaNeedles, startDate, endDate });
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       const yoy = getCampaignYoy(filters.yoyRows, campaign);
       response.end(JSON.stringify({ campaign, business, mediaAdTypes, startDate, endDate, metrics, trend, weeklyGa, yoy }));
@@ -1320,11 +1342,19 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
-  if (pathname === '/api/campaign-media-table') {
+  if (pathname === '/api/campaign-media-table' || pathname === '/api/test-report-media-table') {
     const url = new URL(request.url, `http://${request.headers.host}`);
     const campaign = url.searchParams.get('campaign')?.trim() || 'all';
     try {
-      const result = await getCampaignMediaTable({ campaign });
+      let result;
+      if (pathname === '/api/test-report-media-table') {
+        const filters = await getCampaignFilters();
+        result = reportMediaTable(await getTestReport(filters), {
+          campaign, endDate: reportYesterday(), mediaHistory: filters.historyRows ?? [],
+        });
+      } else {
+        result = await getCampaignMediaTable({ campaign });
+      }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify(result));
     } catch (error) {

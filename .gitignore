@@ -4,3 +4,4 @@
 credentials.json
 service-account*.json
 secrets/
+/node_modules/
