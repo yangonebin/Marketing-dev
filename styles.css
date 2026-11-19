@@ -328,6 +328,48 @@ td { padding: 12px 8px; }
 .media-weekly-table th:first-child, .media-weekly-table td:first-child { text-align: left; }
 .media-weekly-table.business-mode th:nth-child(2), .media-weekly-table.business-mode td:nth-child(2) { text-align: center; }
 .media-weekly-table .ga-cell { justify-content: flex-end; }
+#campaign-report:not([data-test-mode="true"]) .test-report-controls,
+#campaign-report[data-test-mode="true"] .legacy-weekly-media-controls,
+#campaign-report:not([data-test-mode="true"]) .test-report-column,
+#campaign-report[data-test-mode="true"] .weekly-ga-panel { display: none; }
+#campaign-report[data-test-mode="true"] .media-detail-table { min-width: 1560px; }
+#campaign-report[data-test-mode="true"] .media-weekly-table {
+  table-layout: fixed;
+  font-size: 9px;
+}
+#campaign-report[data-test-mode="true"] .media-weekly-table :is(th, td) {
+  padding: 6px 3px;
+  font-size: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#campaign-report[data-test-mode="true"] .media-weekly-table .ga-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+#campaign-report[data-test-mode="true"] .media-weekly-table .ga-delta {
+  display: inline;
+  padding: 1px 2px;
+  font-size: 8px;
+  line-height: 1.15;
+}
+#campaign-report[data-test-mode="true"] .media-group-head th { text-align: left; }
+#campaign-report[data-test-mode="true"] .media-group-head .ga-conversion-group {
+  color: #8de4cf;
+  border-top: 2px solid #62e2c2;
+  background: rgba(98,226,194,.08);
+}
+#campaign-report[data-test-mode="true"] :is(.media-weekly-table, .media-detail-table) .ga-conversion-cell {
+  background: rgba(98,226,194,.045);
+}
+#campaign-report[data-test-mode="true"] .media-detail-table .ga-conversion-cell {
+  white-space: nowrap;
+}
+#campaign-report[data-test-mode="true"] .ga-conversion-cell:not(.ga-conversion-cell + .ga-conversion-cell) {
+  border-left: 2px solid rgba(98,226,194,.28);
+}
 .media-weekly-table .media-weekly-total td { border-top: 2px solid rgba(72,217,255,.64); border-bottom: 2px solid rgba(72,217,255,.3); color: #fff; background: #17283a; font-weight: 800; }
 .media-attribute-badge.kpi-total { color: #f0f3fb; border-color: rgba(210,220,245,.22); background: rgba(210,220,245,.1); }
 .media-value-with-gap { min-height: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; white-space: nowrap; }
@@ -406,6 +448,29 @@ td { padding: 12px 8px; }
 .campaign-media-options label:hover { background: rgba(124,108,255,.14); }.campaign-media-options label.select-all { margin-bottom: 4px; border-bottom: 1px solid var(--line); border-radius: 7px 7px 0 0; color: #fff; font-weight: 700; }
 .campaign-media-options input { width: 14px; height: 14px; margin: 0; accent-color: #6557dc; }
 .campaign-kpis { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+#campaign-report[data-test-mode="true"] #campaign-kpis {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+#campaign-report[data-test-mode="true"] #campaign-kpis [data-kpi-key="cost"] {
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+}
+#campaign-report[data-test-mode="true"] #campaign-kpis [data-kpi-key="cost"].selected::before {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+}
+#campaign-report[data-test-mode="true"] #campaign-kpis strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1100px) {
+  #campaign-report[data-test-mode="true"] #campaign-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #campaign-report[data-test-mode="true"] #campaign-kpis [data-kpi-key="cost"] { grid-row: auto; grid-column: 1 / -1; }
+}
 .campaign-kpi { padding: 17px 18px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, rgba(25,31,50,.94), rgba(13,18,31,.96)); }
 .campaign-kpi[role="button"] { cursor: pointer; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease, background .18s ease; }
 .campaign-kpi[role="button"]:hover { transform: translateY(-2px); border-color: rgba(158,174,255,.32); }

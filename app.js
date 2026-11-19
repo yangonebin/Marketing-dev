@@ -57,7 +57,33 @@ const campaignKpiDefinitions = [
   { key: 'cpm', label: 'CPM', goal: 84 }, { key: 'ctr', label: 'CTR', goal: 91 }, { key: 'cpv', label: 'CPV', goal: 76 },
   { key: 'purchaseRate', label: '구매전환율(GA)', goal: 87, yoy: false }, { key: 'cpo', label: 'CPO', goal: 82, yoy: false }, { key: 'roas', label: 'ROAS', goal: 97, yoy: false }, { key: 'users', label: '총 사용자수', comparison: false },
 ];
+const testKpiDefinitions = [
+  ...['cost', 'impressions', 'clicks', 'views'].map(key => campaignKpiDefinitions.find(definition => definition.key === key)),
+  { key: 'mediaRevenue', label: '매출액(매체)' },
+  { key: 'revenue', label: '매출액(GA)' },
+  campaignKpiDefinitions.find(definition => definition.key === 'cpm'),
+  { key: 'cpc', label: 'CPC' },
+  campaignKpiDefinitions.find(definition => definition.key === 'cpv'),
+  { key: 'mediaRoas', label: 'ROAS(매체)' },
+  { key: 'roas', label: 'ROAS(GA)' },
+];
+const reportKpiDefinitions = () => isTestReport() ? testKpiDefinitions : campaignKpiDefinitions;
+function testKpiComparison(key, actual, target) {
+  if (!Number.isFinite(actual) || !Number.isFinite(target) || target <= 0) return '';
+  const unitCost = ['cpm', 'cpc', 'cpv'].includes(key);
+  const roas = ['mediaRoas', 'roas'].includes(key);
+  const difference = actual - target;
+  const change = unitCost || roas ? difference : difference / target * 100;
+  const digits = unitCost || roas ? 0 : 1;
+  const magnitude = Number(Math.abs(change).toFixed(digits));
+  const sign = magnitude === 0 ? '' : change > 0 ? '+' : '−';
+  const value = number.format(magnitude) + (unitCost ? '원' : roas ? '%p' : '%');
+  const favorable = ['cost', 'cpm', 'cpc', 'cpv'].includes(key) ? difference <= 0 : difference >= 0;
+  const targetLabel = formatTrendValue(key, target);
+  return `<small title="선택 사업부·매체의 미디어믹스 전체 목표 ${targetLabel}" class="${favorable ? 'positive' : 'negative'}"><b>${sign}${value}</b> KPI 대비</small>`;
+}
 const campaignKpiComparison = (definition, currentValue, baseline) => {
+  if (isTestReport()) return '';
   if (definition.comparison === false) return '';
   const goal = '<small class="' + (definition.goal >= 100 ? 'positive' : 'negative') + '"><b>' + (definition.goal >= 100 ? '▲' : '▼') + ' ' + definition.goal + '%</b> 목표 대비</small>';
   if (definition.yoy === false) return goal;
@@ -69,7 +95,9 @@ const campaignKpiComparison = (definition, currentValue, baseline) => {
   return goal + '<small title="선택 기간·필터 실적과 YoY 데이터 시트의 캠페인 전체 기준값 비교" class="' + (favorable ? 'positive' : 'negative') + '"><b>' + (change > 0 ? '▲' : change < 0 ? '▼' : '') + ' ' + Math.abs(change).toFixed(1) + '%</b> YoY 대비</small>';
 };
 const trendColors = ['#48d9ff', '#ff8ca2', '#a99eff'];
-let selectedTrendMetrics = ['cost', 'revenue'];
+const campaignTrendMetrics = ['cost', 'revenue'];
+const testTrendMetrics = ['cost', 'revenue'];
+const reportTrendMetrics = () => isTestReport() ? testTrendMetrics : campaignTrendMetrics;
 let trendTimeUnit = 'daily';
 let campaignMediaOptions = [];
 let legacyCampaignMediaOptions = [];
@@ -81,6 +109,7 @@ let campaignMixRequestId = 0;
 let weeklyGaViewMode = 'combined';
 let latestWeeklyGaRows = [];
 let weeklyMediaViewMode = 'combined';
+let weeklyMediaUnit = 'all';
 let latestWeeklyMediaRows = [];
 let latestWeeklyMediaTotal = {};
 let latestWeeklyMediaBusinessProgress = [];
@@ -89,6 +118,7 @@ let latestMediaDailyRows = [];
 let latestMediaCreativeRows = [];
 let latestMediaHistoryRows = [];
 let dialogCreativeRows = [];
+let dialogCreativeHighlights = [];
 let creativeSort = { key: 'cost', direction: 'desc' };
 
 function makeTrendChart(period) {
@@ -233,8 +263,15 @@ function renderCampaignReport() {
   const cpo = metrics.conversions ? metrics.cost / metrics.conversions : 0;
   const kpiValues = { impressions: metrics.impressions, clicks: metrics.clicks, views, cost: metrics.cost, conversions: metrics.conversions, revenue: metrics.revenue, sessions: 0, cpm, ctr: metrics.ctr, cpv, purchaseRate, cpo, roas: metrics.roas, users: 0 };
   const formatKpi = (key, value) => ['ctr', 'purchaseRate', 'roas'].includes(key) ? `${value.toFixed(key === 'roas' ? 0 : 2)}%` : number.format(Math.round(value));
-  document.querySelector('#campaign-kpis').innerHTML = campaignKpiDefinitions.map(definition => `<article class="campaign-kpi ${definition.label === 'ROAS' ? 'accent' : ''} ${selectedTrendMetrics.includes(definition.key) ? 'selected' : ''}" role="button" tabindex="0" data-kpi-key="${definition.key}" aria-pressed="${selectedTrendMetrics.includes(definition.key)}"><span>${definition.label}</span><strong>${formatKpi(definition.key, kpiValues[definition.key])}</strong><div class="kpi-progress">${campaignKpiComparison(definition)}</div></article>`).join('');
-  renderCampaignTrend(rows, kpiValues);
+  const selectedTrendMetrics = reportTrendMetrics();
+  document.querySelector('#campaign-kpis').innerHTML = reportKpiDefinitions().map(definition => {
+    const selected = selectedTrendMetrics.includes(definition.key);
+    const accent = !isTestReport() && definition.key === 'roas';
+    return `<article class="campaign-kpi ${accent ? 'accent' : ''} ${selected ? 'selected' : ''}" role="button" tabindex="0" data-kpi-key="${definition.key}" aria-pressed="${selected}"><span>${definition.label}</span><strong>${isTestReport() ? '–' : formatKpi(definition.key, kpiValues[definition.key])}</strong><div class="kpi-progress">${campaignKpiComparison(definition)}</div></article>`;
+  }).join('');
+  if (isTestReport()) {
+    renderCampaignTrend([]);
+  } else renderCampaignTrend(rows, kpiValues);
 
   document.querySelector('#campaign-table-body').innerHTML = '<tr><td colspan="12" class="empty-state">GA 데이터 불러오는 중…</td></tr>';
   loadCampaignMediaMetrics();
@@ -244,22 +281,36 @@ async function loadCampaignMediaMetrics() {
   const campaign = document.querySelector('#campaign-select').value;
   const business = document.querySelector('#campaign-business').value;
   const requestId = ++campaignMetricRequestId;
-  const mediaKeys = ['impressions', 'clicks', 'views', 'cost', 'cpm', 'ctr', 'cpv', 'conversions', 'revenue', 'purchaseRate', 'cpo', 'roas', 'sessions', 'users'];
+  const definitions = reportKpiDefinitions();
+  const mediaKeys = definitions.map(({ key }) => key);
   mediaKeys.forEach(key => document.querySelector(`[data-kpi-key="${key}"]`)?.classList.add('loading'));
   try {
     const params = new URLSearchParams({ campaign, business, media: [...selectedCampaignMedia].join(','), start: startDate.value, end: endDate.value });
-    const response = await fetch(`/api/campaign-media-metrics?${params}`, { headers: { Accept: 'application/json' } });
-    const result = await response.json();
+    const endpoint = isTestReport() ? '/api/test-report-metrics' : '/api/campaign-media-metrics';
+    const response = await fetch(`${endpoint}?${params}`, { headers: { Accept: 'application/json' } });
+    const result = await readJsonResponse(response);
     if (!response.ok) throw new Error(result.error || '매체 데이터를 불러오지 못했습니다.');
     if (requestId !== campaignMetricRequestId) return;
-    const format = (key, value) => ['ctr', 'purchaseRate', 'roas'].includes(key) ? `${value.toFixed(key === 'roas' ? 0 : 2)}%` : number.format(Math.round(value));
-    mediaKeys.forEach(key => {
+    if (isTestReport() && !Object.hasOwn(result.metrics, 'mediaRevenue')) {
+      try {
+        await loadLegacyMediaRevenue(result, params);
+      } catch (error) {
+        console.warn('매체 매출액을 불러오지 못했습니다.', error.message);
+      }
+      if (requestId !== campaignMetricRequestId) return;
+    }
+    const kpiTarget = isTestReport()
+      ? result.target ?? campaignTargetFromFilters(campaign, business)
+      : null;
+    definitions.forEach(definition => {
+      const { key } = definition;
       const card = document.querySelector(`[data-kpi-key="${key}"]`);
       if (!card) return;
       card.classList.remove('loading', 'load-error');
-      card.querySelector('strong').textContent = format(key, result.metrics[key]);
-      const definition = campaignKpiDefinitions.find(item => item.key === key);
-      card.querySelector('.kpi-progress').innerHTML = campaignKpiComparison(definition, result.metrics[key], result.yoy?.metrics?.[key]);
+      card.querySelector('strong').textContent = formatTrendValue(key, result.metrics[key]);
+      card.querySelector('.kpi-progress').innerHTML = isTestReport()
+        ? testKpiComparison(key, result.metrics[key], kpiTarget[key])
+        : campaignKpiComparison(definition, result.metrics[key], result.yoy?.metrics?.[key]);
     });
     renderCampaignTrend(result.trend);
     latestWeeklyGaRows = result.weeklyGa;
@@ -272,17 +323,108 @@ async function loadCampaignMediaMetrics() {
       card.classList.remove('loading');
       card.classList.add('load-error');
       card.querySelector('strong').textContent = '조회 실패';
-      card.querySelector('.kpi-progress').innerHTML = `<small class="actual-data">${error.message}</small>`;
+      card.querySelector('.kpi-progress').innerHTML = `<small class="actual-data">${escapeHtml(error.message)}</small>`;
     });
-    document.querySelector('#campaign-table-body').innerHTML = `<tr><td colspan="12" class="empty-state">${error.message}</td></tr>`;
+    document.querySelector('#campaign-table-body').innerHTML = `<tr><td colspan="12" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
   }
+}
+
+async function loadLegacyMediaRevenue(summary, params) {
+  const campaign = new URLSearchParams({ campaign: params.get('campaign') });
+  const response = await fetch(`/api/test-report-media-table?${campaign}`, { headers: { Accept: 'application/json' } });
+  const result = await readJsonResponse(response);
+  if (!response.ok) throw new Error(result.error || '매체 매출액을 불러오지 못했습니다.');
+
+  const business = params.get('business');
+  const media = new Set(params.get('media').split(','));
+  const start = params.get('start');
+  const end = params.get('end');
+  const byDate = new Map();
+  let total = null;
+  for (const row of result.mediaDaily ?? []) {
+    if ((business !== 'all' && row.business !== business) || !media.has(row.mediaAdType)
+      || row.metricDate < start || row.metricDate > end || !Number.isFinite(row.revenue)) continue;
+    byDate.set(row.metricDate, (byDate.get(row.metricDate) ?? 0) + row.revenue);
+    total = (total ?? 0) + row.revenue;
+  }
+  summary.metrics.mediaRevenue = total;
+  summary.metrics.mediaRoas = mediaRatio(total, summary.metrics.cost, 100);
+  for (const row of summary.trend) {
+    row.mediaRevenue = byDate.get(row.date) ?? null;
+    row.mediaRoas = mediaRatio(row.mediaRevenue, row.cost, 100);
+  }
+}
+
+const mediaColumns = [
+  ['cost', '광고비'], ['impressions', '노출'], ['clicks', '클릭'], ['views', '조회'],
+  ['cpm', 'CPM'], ['cpc', 'CPC'], ['cpv', 'CPV'], ['ctr', 'CTR', 2], ['vtr', 'VTR', 2],
+];
+const purchaseColumns = [
+  ['purchases', '구매수'], ['revenue', '총수익'], ['cpo', 'CPO'], ['cvr', 'CVR', 2], ['roas', 'ROAS', 0],
+];
+const testPurchaseColumns = purchaseColumns.filter(([key]) => key !== 'cpo');
+const gaConversionColumns = [
+  ['gaPurchases', '구매수'], ['gaRevenue', '총수익'], ['gaRoas', 'ROAS', 0],
+];
+const mediaTotals = { cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0, gaPurchases: 0, gaRevenue: 0 };
+
+function addMediaTotals(total, row) {
+  for (const key of Object.keys(mediaTotals)) {
+    if (isTestReport() && row[key] == null) continue;
+    total[key] = (total[key] ?? 0) + (Number(row[key]) || 0);
+  }
+  return total;
+}
+
+const blankMediaTotals = Object.fromEntries(Object.keys(mediaTotals).map(key => [key, null]));
+function campaignTargetFromFilters(campaign, business) {
+  const targets = campaignFilterRows.filter(row => row.target
+    && (campaign === 'all' || row.campaign === campaign)
+    && (business === 'all' || row.business === business)
+    && selectedCampaignMedia.has(row.mediaAdType));
+  const totals = targets.reduce((sum, row) => addMediaTotals(sum, row.target), { ...blankMediaTotals });
+  const goal = withMediaRates(totals);
+  return { ...goal, mediaRevenue: goal.revenue, mediaRoas: goal.roas };
+}
+const mediaTotalsForView = () => isTestReport() ? blankMediaTotals : mediaTotals;
+const mediaRatio = (numerator, denominator, factor = 1) =>
+  isTestReport() && (numerator == null || denominator == null) ? null : denominator ? numerator / denominator * factor : 0;
+
+function withMediaRates(row) {
+  const { cost, impressions, clicks, views, purchases, revenue, gaPurchases, gaRevenue } = row;
+  return {
+    ...row, gaPurchases, gaRevenue,
+    cpm: mediaRatio(cost, impressions, 1000),
+    cpc: mediaRatio(cost, clicks),
+    cpv: mediaRatio(cost, views),
+    ctr: mediaRatio(clicks, impressions, 100),
+    vtr: mediaRatio(views, impressions, 100),
+    cpo: mediaRatio(cost, purchases),
+    cvr: mediaRatio(purchases, clicks, 100),
+    roas: mediaRatio(revenue, cost, 100),
+    gaRoas: mediaRatio(gaRevenue, cost, 100),
+  };
+}
+
+const formatMediaValue = (value, digits) => isTestReport() && value == null ? '–' : digits === undefined
+  ? number.format(Math.round(value ?? 0))
+  : `${Number(value ?? 0).toFixed(digits)}%`;
+
+function gaConversionCells(row, roasGap = '') {
+  if (!isTestReport()) return '';
+  const metrics = withMediaRates(row);
+  return gaConversionColumns.map(([key, , digits]) =>
+    `<td class="ga-conversion-cell">${key === 'gaRoas' && roasGap
+      ? `<div class="media-value-with-gap"><strong>${formatMediaValue(metrics[key], digits)}</strong>${roasGap}</div>`
+      : formatMediaValue(metrics[key], digits)}</td>`).join('');
 }
 
 async function loadCampaignMediaTable() {
   const tableBody = document.querySelector('#campaign-media-detail-body');
   const campaign = document.querySelector('#campaign-select').value;
   const requestId = ++campaignMediaTableRequestId;
-  tableBody.innerHTML = '<tr><td colspan="19" class="empty-state">매체 데이터를 불러오는 중…</td></tr>';
+  const columnCount = isTestReport() ? 21 : 19;
+  tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="empty-state">매체 데이터를 불러오는 중…</td></tr>`;
   try {
     const today = new Date();
     const yesterday = addDays(today, -1);
@@ -293,8 +435,9 @@ async function loadCampaignMediaTable() {
       .map(match => new Date(today.getFullYear(), Number(match[1]) - 1, Number(match[2])));
     const cumulativeStart = operationDates.length ? new Date(Math.min(...operationDates)) : new Date(today.getFullYear(), 0, 1);
     const params = new URLSearchParams({ campaign, start: toInputDate(cumulativeStart), end: toInputDate(yesterday) });
-    const response = await fetch(`/api/campaign-media-table?${params}`, { headers: { Accept: 'application/json' } });
-    const result = await response.json();
+    const endpoint = isTestReport() ? '/api/test-report-media-table' : '/api/campaign-media-table';
+    const response = await fetch(`${endpoint}?${params}`, { headers: { Accept: 'application/json' } });
+    const result = await readJsonResponse(response);
     if (!response.ok) throw new Error(result.error || '매체 데이터를 불러오지 못했습니다.');
     if (requestId !== campaignMediaTableRequestId) return;
     renderBusinessProgress(result.businessProgress ?? [], result.rows);
@@ -307,27 +450,27 @@ async function loadCampaignMediaTable() {
     latestMediaCreativeRows = result.mediaCreative ?? [];
     latestMediaHistoryRows = result.mediaHistory ?? [];
     renderWeeklyMediaTable();
-    renderDailyMediaPerformance(result.dailyMedia ?? []);
+    renderDailyMediaPerformance(result.dailyMedia ?? [], result.startDate);
     if (!result.rows.length) {
-      tableBody.innerHTML = '<tr><td colspan="19" class="empty-state">선택한 캠페인의 미디어믹스 데이터가 없습니다.</td></tr>';
+      tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="empty-state">선택한 캠페인의 미디어믹스 데이터가 없습니다.</td></tr>`;
       return;
     }
     const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-    const integer = value => number.format(Math.round(value));
-    const percent = (value, digits = 2) => `${Number(value).toFixed(digits)}%`;
+    const integer = value => formatMediaValue(value);
+    const percent = (value, digits = 2) => formatMediaValue(value, digits);
     const operationDate = value => {
       const match = String(value ?? '').match(/(\d{1,2})월\s*(\d{1,2})일/);
       return match ? `${Number(match[1])}/${Number(match[2])}` : String(value || '-');
     };
     const kpiClasses = { '도달': 'reach', '조회': 'view', '트래픽': 'traffic', '전환': 'conversion' };
-    const achievementGap = (actual, target) => {
-      if (!target) return '';
+    const achievementGap = (key, actual, target) => {
+      if ((isTestReport() && key !== 'cost') || actual == null || !target) return '';
       const rate = actual / target * 100;
       const state = rate >= 100 ? 'progress-high' : 'progress-low';
       return `<small class="media-inline-gap ${state}">${rate.toFixed(0)}%</small>`;
     };
     const differenceGap = (key, actual, target) => {
-      if (!target) return '';
+      if ((isTestReport() && key === 'cvr') || actual == null || !target) return '';
       const gap = actual - target;
       const lowerIsBetter = ['cpm', 'cpc', 'cpv', 'cpo'].includes(key);
       const positive = lowerIsBetter ? gap <= 0 : gap >= 0;
@@ -339,7 +482,7 @@ async function loadCampaignMediaTable() {
       return `<small class="media-inline-gap ${state}">${formatted}</small>`;
     };
     const metricCell = (value, gap = '') => `<td><div class="media-value-with-gap"><strong>${value}</strong>${gap}</div></td>`;
-    const calculateRowMetrics = values => ({
+    const calculateRowMetrics = values => isTestReport() ? withMediaRates(values) : ({
       ...values,
       cpm: values.impressions ? values.cost / values.impressions * 1000 : 0,
       cpc: values.clicks ? values.cost / values.clicks : 0,
@@ -364,9 +507,12 @@ async function loadCampaignMediaTable() {
       const ends = businessRows.map(row => row.operationEnd).sort((a, b) => dateValue(b) - dateValue(a));
       const actual = sum(row => row);
       const serverTotal = result.businessProgress?.find(item => item.business === business);
+      if (isTestReport() && serverTotal) return { business, operationStart: starts[0], operationEnd: ends[0], ...withMediaRates(serverTotal.actual), target: withMediaRates(serverTotal.target) };
       if (serverTotal) {
         actual.purchases = serverTotal.actual.purchases;
         actual.revenue = serverTotal.actual.revenue;
+        actual.gaPurchases = serverTotal.actual.gaPurchases;
+        actual.gaRevenue = serverTotal.actual.gaRevenue;
       }
       return { business, operationStart: starts[0] ?? '', operationEnd: ends[0] ?? '', ...calculateRowMetrics(actual), target: calculateRowMetrics(sum(row => row.target)) };
     };
@@ -374,105 +520,122 @@ async function loadCampaignMediaTable() {
       const inactive = row.impressions === 0;
       const gap = (builder, ...args) => inactive ? '' : builder(...args);
       const period = `${operationDate(row.operationStart)}–${operationDate(row.operationEnd)}`;
-      return `<tr class="media-result-row media-total-row ${inactive ? 'media-inactive-row' : ''}" data-business="${row.business}" data-kpi="TOTAL"><td><span class="media-attribute-badge business-${row.business.toLowerCase()}">${row.business}</span></td><td><span class="media-attribute-badge kpi-total">TOTAL</span></td><td><strong>전체</strong></td><td><strong class="media-total-label">전체 매체 합계</strong></td><td>${period}</td>${metricCell(integer(row.cost), gap(achievementGap, row.cost, row.target.cost))}${metricCell(integer(row.impressions), gap(achievementGap, row.impressions, row.target.impressions))}${metricCell(integer(row.clicks), gap(achievementGap, row.clicks, row.target.clicks))}${metricCell(integer(row.views), gap(achievementGap, row.views, row.target.views))}${metricCell(integer(row.cpm), gap(differenceGap, 'cpm', row.cpm, row.target.cpm))}${metricCell(integer(row.cpc), gap(differenceGap, 'cpc', row.cpc, row.target.cpc))}${metricCell(integer(row.cpv), gap(differenceGap, 'cpv', row.cpv, row.target.cpv))}${metricCell(percent(row.ctr), gap(differenceGap, 'ctr', row.ctr, row.target.ctr))}${metricCell(percent(row.vtr), gap(differenceGap, 'vtr', row.vtr, row.target.vtr))}${metricCell(integer(row.purchases), gap(achievementGap, row.purchases, row.target.purchases))}${metricCell(integer(row.revenue), gap(achievementGap, row.revenue, row.target.revenue))}${metricCell(integer(row.cpo), gap(differenceGap, 'cpo', row.cpo, row.target.cpo))}${metricCell(percent(row.cvr), gap(differenceGap, 'cvr', row.cvr, row.target.cvr))}${metricCell(percent(row.roas, 0), gap(differenceGap, 'roas', row.roas, row.target.roas))}</tr>`;
+      return `<tr class="media-result-row media-total-row ${inactive ? 'media-inactive-row' : ''}" data-business="${row.business}" data-kpi="TOTAL"><td><span class="media-attribute-badge business-${row.business.toLowerCase()}">${row.business}</span></td><td><span class="media-attribute-badge kpi-total">TOTAL</span></td><td><strong>전체</strong></td><td><strong class="media-total-label">전체 매체 합계</strong></td><td>${period}</td>${metricCell(integer(row.cost), gap(achievementGap, 'cost', row.cost, row.target.cost))}${metricCell(integer(row.impressions), gap(achievementGap, 'impressions', row.impressions, row.target.impressions))}${metricCell(integer(row.clicks), gap(achievementGap, 'clicks', row.clicks, row.target.clicks))}${metricCell(integer(row.views), gap(achievementGap, 'views', row.views, row.target.views))}${metricCell(integer(row.cpm), gap(differenceGap, 'cpm', row.cpm, row.target.cpm))}${metricCell(integer(row.cpc), gap(differenceGap, 'cpc', row.cpc, row.target.cpc))}${metricCell(integer(row.cpv), gap(differenceGap, 'cpv', row.cpv, row.target.cpv))}${metricCell(percent(row.ctr), gap(differenceGap, 'ctr', row.ctr, row.target.ctr))}${metricCell(percent(row.vtr), gap(differenceGap, 'vtr', row.vtr, row.target.vtr))}${metricCell(integer(row.purchases), gap(achievementGap, 'purchases', row.purchases, row.target.purchases))}${metricCell(integer(row.revenue), gap(achievementGap, 'revenue', row.revenue, row.target.revenue))}${isTestReport() ? '' : metricCell(integer(row.cpo), gap(differenceGap, 'cpo', row.cpo, row.target.cpo))}${metricCell(percent(row.cvr), gap(differenceGap, 'cvr', row.cvr, row.target.cvr))}${metricCell(percent(row.roas, 0), gap(differenceGap, 'roas', row.roas, row.target.roas))}${gaConversionCells(row, gap(differenceGap, 'roas', row.gaRoas, row.target.roas))}</tr>`;
     };
-    const totalRows = ['MKT', 'PERF'].map(aggregateBusiness).map(renderTotalRow).join('');
+    const totalUnits = isTestReport() ? latestWeeklyMediaBusinessProgress.map(item => item.business) : ['MKT', 'PERF'];
+    const totalRows = totalUnits.map(aggregateBusiness).map(renderTotalRow).join('');
     const detailRows = result.rows.map((row, index) => {
       const previous = result.rows[index - 1];
       const groupStart = !previous || previous.business !== row.business || previous.kpi !== row.kpi;
       const inactive = row.impressions === 0;
       const period = `${operationDate(row.operationStart)}–${operationDate(row.operationEnd)}`;
       const gap = (builder, ...args) => inactive ? '' : builder(...args);
-      return `<tr class="media-result-row media-drilldown-row ${groupStart ? 'attribute-group-start' : ''} ${inactive ? 'media-inactive-row' : ''}" data-business="${escapeHtml(row.business)}" data-kpi="${escapeHtml(row.kpi)}" data-media-ad-type="${escapeHtml(row.mediaAdType)}" tabindex="0" aria-label="${escapeHtml(row.media)} 일자별 상세 보기"><td><span class="media-attribute-badge business-${row.business.toLowerCase()}">${escapeHtml(row.business)}</span></td><td><span class="media-attribute-badge kpi-${kpiClasses[row.kpi] ?? 'other'}">${escapeHtml(row.kpi || '-')}</span></td><td>${escapeHtml(row.platform)}</td><td><strong>${escapeHtml(row.media)}</strong></td><td>${escapeHtml(period)}</td>${metricCell(integer(row.cost), gap(achievementGap, row.cost, row.target.cost))}${metricCell(integer(row.impressions), gap(achievementGap, row.impressions, row.target.impressions))}${metricCell(integer(row.clicks), gap(achievementGap, row.clicks, row.target.clicks))}${metricCell(integer(row.views), gap(achievementGap, row.views, row.target.views))}${metricCell(integer(row.cpm), gap(differenceGap, 'cpm', row.cpm, row.target.cpm))}${metricCell(integer(row.cpc), gap(differenceGap, 'cpc', row.cpc, row.target.cpc))}${metricCell(integer(row.cpv), gap(differenceGap, 'cpv', row.cpv, row.target.cpv))}${metricCell(percent(row.ctr), gap(differenceGap, 'ctr', row.ctr, row.target.ctr))}${metricCell(percent(row.vtr), gap(differenceGap, 'vtr', row.vtr, row.target.vtr))}${metricCell(integer(row.purchases), gap(achievementGap, row.purchases, row.target.purchases))}${metricCell(integer(row.revenue), gap(achievementGap, row.revenue, row.target.revenue))}${metricCell(integer(row.cpo), gap(differenceGap, 'cpo', row.cpo, row.target.cpo))}${metricCell(percent(row.cvr), gap(differenceGap, 'cvr', row.cvr, row.target.cvr))}${metricCell(percent(row.roas, 0), gap(differenceGap, 'roas', row.roas, row.target.roas))}</tr>`;
+      return `<tr class="media-result-row media-drilldown-row ${groupStart ? 'attribute-group-start' : ''} ${inactive ? 'media-inactive-row' : ''}" data-business="${escapeHtml(row.business)}" data-kpi="${escapeHtml(row.kpi)}" data-media-ad-type="${escapeHtml(row.mediaAdType)}" tabindex="0" aria-label="${escapeHtml(row.media)} 일자별 상세 보기"><td><span class="media-attribute-badge business-${row.business.toLowerCase()}">${escapeHtml(row.business)}</span></td><td><span class="media-attribute-badge kpi-${kpiClasses[row.kpi] ?? 'other'}">${escapeHtml(row.kpi || '-')}</span></td><td>${escapeHtml(row.platform)}</td><td><strong>${escapeHtml(row.media)}</strong></td><td>${escapeHtml(period)}</td>${metricCell(integer(row.cost), gap(achievementGap, 'cost', row.cost, row.target.cost))}${metricCell(integer(row.impressions), gap(achievementGap, 'impressions', row.impressions, row.target.impressions))}${metricCell(integer(row.clicks), gap(achievementGap, 'clicks', row.clicks, row.target.clicks))}${metricCell(integer(row.views), gap(achievementGap, 'views', row.views, row.target.views))}${metricCell(integer(row.cpm), gap(differenceGap, 'cpm', row.cpm, row.target.cpm))}${metricCell(integer(row.cpc), gap(differenceGap, 'cpc', row.cpc, row.target.cpc))}${metricCell(integer(row.cpv), gap(differenceGap, 'cpv', row.cpv, row.target.cpv))}${metricCell(percent(row.ctr), gap(differenceGap, 'ctr', row.ctr, row.target.ctr))}${metricCell(percent(row.vtr), gap(differenceGap, 'vtr', row.vtr, row.target.vtr))}${metricCell(integer(row.purchases), gap(achievementGap, 'purchases', row.purchases, row.target.purchases))}${metricCell(integer(row.revenue), gap(achievementGap, 'revenue', row.revenue, row.target.revenue))}${isTestReport() ? '' : metricCell(integer(row.cpo), gap(differenceGap, 'cpo', row.cpo, row.target.cpo))}${metricCell(percent(row.cvr), gap(differenceGap, 'cvr', row.cvr, row.target.cvr))}${metricCell(percent(row.roas, 0), gap(differenceGap, 'roas', row.roas, row.target.roas))}${gaConversionCells(row, gap(differenceGap, 'roas', row.gaRoas, row.target.roas))}</tr>`;
     }).join('');
     tableBody.innerHTML = totalRows + detailRows;
   } catch (error) {
     if (requestId !== campaignMediaTableRequestId) return;
-    tableBody.innerHTML = `<tr><td colspan="19" class="empty-state">${error.message}</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
   }
 }
 
+const gaCellClass = key => key.startsWith('ga') ? ' class="ga-conversion-cell"' : '';
+
 function renderWeeklyMediaTable() {
   const body = document.querySelector('#campaign-media-weekly-body');
-  const businessMode = weeklyMediaViewMode === 'business';
-  document.querySelector('.media-weekly-table').classList.toggle('business-mode', businessMode);
-  document.querySelector('#weekly-media-business-header').hidden = !businessMode;
-  const columnCount = businessMode ? 9 : 8;
-  const integer = value => number.format(Math.round(Number(value) || 0));
-  const percent = (value, digits = 2) => `${Number(value || 0).toFixed(digits)}%`;
-  const calculate = values => ({ ...values, ctr: values.impressions ? values.clicks / values.impressions * 100 : 0, roas: values.cost ? values.revenue / values.cost * 100 : 0 });
-  const sum = rows => calculate(rows.reduce((total, row) => {
-    ['cost', 'impressions', 'clicks', 'purchases', 'revenue'].forEach(key => { total[key] += Number(row[key]) || 0; });
-    return total;
-  }, { cost: 0, impressions: 0, clicks: 0, purchases: 0, revenue: 0 }));
+  const table = body.closest('table');
+  const testMode = isTestReport();
+  const businessMode = !testMode && weeklyMediaViewMode === 'business';
+  const sourceRows = testMode && weeklyMediaUnit !== 'all'
+    ? latestWeeklyMediaRows.filter(row => row.business === weeklyMediaUnit)
+    : latestWeeklyMediaRows;
+  const columns = testMode ? [...mediaColumns, ...testPurchaseColumns, ...gaConversionColumns] : [
+    ...mediaColumns.slice(0, 3), mediaColumns[7], ['purchases', '구매'], ['revenue', '매출'], purchaseColumns[4],
+  ];
+  const attributeCount = businessMode ? 2 : 1;
+  const columnCount = attributeCount + columns.length;
+  const groupHeaders = testMode ? `<tr class="media-group-head"><th colspan="${attributeCount}" scope="colgroup" class="attribute-group"><span>01</span>속성</th><th colspan="9" scope="colgroup" class="media-metric-group"><span>02</span>매체 데이터</th><th colspan="${testPurchaseColumns.length}" scope="colgroup" class="purchase-group"><span>03</span>구매 데이터</th><th colspan="${gaConversionColumns.length}" scope="colgroup" class="ga-conversion-group"><span>04</span>GA 전환 데이터</th></tr>` : '';
+  table.classList.toggle('business-mode', businessMode);
+  table.tHead.innerHTML = groupHeaders + `<tr><th scope="col">주차</th>${businessMode ? '<th scope="col">사업부</th>' : ''}${columns.map(([key, label]) => `<th scope="col"${gaCellClass(key)}>${label}</th>`).join('')}</tr>`;
+  const sum = rows => withMediaRates(rows.reduce(addMediaTotals, { ...mediaTotalsForView() }));
   const groups = new Map();
-  latestWeeklyMediaRows.forEach(row => {
+  sourceRows.forEach(row => {
     const key = businessMode ? `${row.weekStart}\u0000${row.business}` : row.weekStart;
     if (!groups.has(key)) groups.set(key, { weekStart: row.weekStart, business: businessMode ? row.business : '', rows: [] });
     groups.get(key).rows.push(row);
   });
   const displayRows = [...groups.values()].map(group => ({ ...group, ...sum(group.rows) })).sort((a, b) => b.weekStart.localeCompare(a.weekStart) || a.business.localeCompare(b.business));
-  const totals = businessMode
-    ? latestWeeklyMediaBusinessProgress.filter(item => ['MKT', 'PERF'].includes(item.business)).map(item => ({ business: item.business, ...calculate(item.actual) }))
-    : [{ business: '', ...latestWeeklyMediaTotal }];
-  const totalRows = totals.map(total => `<tr class="media-weekly-total"><td><strong>TOTAL</strong></td>${businessMode ? `<td><span class="media-attribute-badge business-${total.business.toLowerCase()}">${total.business}</span></td>` : ''}<td>${integer(total.cost)}</td><td>${integer(total.impressions)}</td><td>${integer(total.clicks)}</td><td>${percent(total.ctr)}</td><td>${integer(total.purchases)}</td><td>${integer(total.revenue)}</td><td>${percent(total.roas, 0)}</td></tr>`).join('');
+  const totals = testMode
+    ? [{ business: '', ...(weeklyMediaUnit === 'all'
+      ? withMediaRates({ ...mediaTotalsForView(), ...latestWeeklyMediaTotal }) : sum(sourceRows)) }]
+    : businessMode
+      ? latestWeeklyMediaBusinessProgress.filter(item => ['MKT', 'PERF'].includes(item.business)).map(item => ({ business: item.business, ...withMediaRates(item.actual) }))
+      : [{ business: '', ...withMediaRates({ ...mediaTotalsForView(), ...latestWeeklyMediaTotal }) }];
+  const totalRows = totals.map(total => `<tr class="media-weekly-total"><td><strong>TOTAL</strong></td>${businessMode ? `<td><span class="media-attribute-badge business-${total.business.toLowerCase()}">${total.business}</span></td>` : ''}${columns.map(([key, , digits]) => `<td${gaCellClass(key)}>${formatMediaValue(total[key], digits)}</td>`).join('')}</tr>`).join('');
   const delta = (current, previous) => {
+    if (isTestReport() && current == null) return '';
     if (previous === undefined || previous === null || previous === 0) return '<small class="ga-delta neutral">기준 주차</small>';
     const change = (current - previous) / previous * 100;
     return `<small class="ga-delta ${change >= 0 ? 'up' : 'down'}">${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(1)}%</small>`;
   };
-  const cell = (value, previous, formatted) => `<td><div class="ga-cell"><strong>${formatted}</strong>${delta(value, previous)}</div></td>`;
+  const cell = (value, previous, formatted, key) => `<td${gaCellClass(key)}><div class="ga-cell"><strong>${formatted}</strong>${delta(value, previous)}</div></td>`;
   const weeklyRows = displayRows.map((row, rowIndex) => {
     const week = String(row.weekStart ?? '').slice(2);
     const previous = displayRows.slice(rowIndex + 1).find(item => !businessMode || item.business === row.business);
-    return `<tr><td><strong>${week} 주차</strong></td>${businessMode ? `<td><span class="media-attribute-badge business-${row.business.toLowerCase()}">${row.business}</span></td>` : ''}${cell(row.cost, previous?.cost, integer(row.cost))}${cell(row.impressions, previous?.impressions, integer(row.impressions))}${cell(row.clicks, previous?.clicks, integer(row.clicks))}${cell(row.ctr, previous?.ctr, percent(row.ctr))}${cell(row.purchases, previous?.purchases, integer(row.purchases))}${cell(row.revenue, previous?.revenue, integer(row.revenue))}${cell(row.roas, previous?.roas, percent(row.roas, 0))}</tr>`;
+    return `<tr><td><strong>${week} 주차</strong></td>${businessMode ? `<td><span class="media-attribute-badge business-${row.business.toLowerCase()}">${row.business}</span></td>` : ''}${columns.map(([key, , digits]) => cell(row[key], previous?.[key], formatMediaValue(row[key], digits), key)).join('')}</tr>`;
   }).join('');
   body.innerHTML = totalRows + (weeklyRows || `<tr><td colspan="${columnCount}" class="empty-state">조회된 주차별 데이터가 없습니다.</td></tr>`);
 }
 
-function renderDailyMediaPerformance(sourceRows = []) {
+function renderDailyMediaPerformance(sourceRows = [], campaignStartDate) {
   const chart = document.querySelector('#campaign-media-daily-chart');
   const body = document.querySelector('#campaign-media-daily-body');
   const dailyMap = new Map();
   sourceRows.forEach(row => {
-    if (!dailyMap.has(row.metricDate)) dailyMap.set(row.metricDate, { metricDate: row.metricDate, cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
-    const daily = dailyMap.get(row.metricDate);
-    ['cost', 'impressions', 'clicks', 'views', 'purchases', 'revenue'].forEach(key => { daily[key] += Number(row[key]) || 0; });
+    if (!dailyMap.has(row.metricDate)) dailyMap.set(row.metricDate, { metricDate: row.metricDate, ...mediaTotalsForView() });
+    addMediaTotals(dailyMap.get(row.metricDate), row);
   });
-  const calculate = row => ({
-    ...row,
-    cpm: row.impressions ? row.cost / row.impressions * 1000 : 0,
-    cpc: row.clicks ? row.cost / row.clicks : 0,
-    cpv: row.views ? row.cost / row.views : 0,
-    ctr: row.impressions ? row.clicks / row.impressions * 100 : 0,
-    vtr: row.impressions ? row.views / row.impressions * 100 : 0,
-    cpo: row.purchases ? row.cost / row.purchases : 0,
-    cvr: row.clicks ? row.purchases / row.clicks * 100 : 0,
-    roas: row.cost ? row.revenue / row.cost * 100 : 0,
-  });
-  const rows = [...dailyMap.values()].map(calculate).sort((a, b) => a.metricDate.localeCompare(b.metricDate));
+  const rows = [...dailyMap.values()].map(withMediaRates).sort((a, b) => a.metricDate.localeCompare(b.metricDate));
   if (!rows.length) {
     chart.innerHTML = '<p class="empty-state">조회된 일자별 그래프 데이터가 없습니다.</p>';
-    body.innerHTML = '<tr><td colspan="15" class="empty-state">조회된 일자별 데이터가 없습니다.</td></tr>';
+    body.innerHTML = `<tr><td colspan="${isTestReport() ? 17 : 15}" class="empty-state">조회된 일자별 데이터가 없습니다.</td></tr>`;
     return;
   }
-  const points = rows.slice(-31);
+  let points = rows.slice(-31);
+  if (isTestReport()) {
+    const firstReportedDay = Date.parse(rows[0].metricDate);
+    const plannedStart = Date.parse(campaignStartDate);
+    const start = plannedStart < firstReportedDay ? plannedStart : firstReportedDay;
+    const end = Date.parse(rows.at(-1).metricDate);
+    const dayMs = 86400000;
+    points = Array.from({ length: (end - start) / dayMs + 1 }, (_, offset) => {
+      const metricDate = new Date(start + offset * dayMs).toISOString().slice(0, 10);
+      return dailyMap.get(metricDate) ?? { metricDate };
+    });
+  }
   const width = 1080, height = 175, left = 38, right = 24, top = 16, bottom = 28;
   const plotHeight = height - top - bottom;
   const step = (width - left - right) / points.length;
-  const maxCost = Math.max(...points.map(row => row.cost), 1) * 1.12;
-  const maxRevenue = Math.max(...points.map(row => row.revenue), 1) * 1.12;
+  const maxCost = Math.max(...points.map(row => row.cost ?? 0), 1) * 1.12;
+  const maxRevenue = Math.max(...points.map(row => row.revenue ?? 0), 1) * 1.12;
   const x = index => left + step * index + step / 2;
   const revenueY = value => top + plotHeight * (1 - value / maxRevenue);
-  const revenuePath = points.map((row, index) => `${index ? 'L' : 'M'} ${x(index)} ${revenueY(row.revenue)}`).join(' ');
+  const revenuePath = points.map((row, index) => row.revenue == null ? '' : `${index && points[index - 1].revenue != null ? 'L' : 'M'} ${x(index)} ${revenueY(row.revenue)}`).join(' ');
   const labelInterval = Math.max(1, Math.ceil(points.length / 10));
-  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="최근 ${points.length}일 광고비와 매출 추이">${[0,1,2,3,4].map(index => `<line class="daily-grid" x1="${left}" y1="${top + plotHeight * index / 4}" x2="${width-right}" y2="${top + plotHeight * index / 4}"/>`).join('')}${points.map((row, index) => { const barHeight = plotHeight * row.cost / maxCost; return `<rect class="daily-media-cost-bar" x="${left + step * index + step * .2}" y="${top + plotHeight - barHeight}" width="${step * .6}" height="${barHeight}" rx="3"/>`; }).join('')}<path class="daily-media-revenue-line" d="${revenuePath}"/>${points.map((row,index) => `<circle class="daily-media-revenue-point" cx="${x(index)}" cy="${revenueY(row.revenue)}" r="3"/>`).join('')}${points.map((row,index) => index % labelInterval === 0 || index === points.length - 1 ? `<text class="daily-label" x="${x(index)}" y="${height-8}" text-anchor="middle">${Number(row.metricDate.slice(5,7))}/${Number(row.metricDate.slice(8,10))}</text>` : '').join('')}</svg>`;
-  const integer = value => number.format(Math.round(value));
-  const percent = (value, digits = 2) => `${Number(value).toFixed(digits)}%`;
-  body.innerHTML = rows.map(row => `<tr class="media-result-row"><td><strong>${row.metricDate.slice(2).replaceAll('-', '/')}</strong></td><td>${integer(row.cost)}</td><td>${integer(row.impressions)}</td><td>${integer(row.clicks)}</td><td>${integer(row.views)}</td><td>${integer(row.cpm)}</td><td>${integer(row.cpc)}</td><td>${integer(row.cpv)}</td><td>${percent(row.ctr)}</td><td>${percent(row.vtr)}</td><td>${integer(row.purchases)}</td><td>${integer(row.revenue)}</td><td>${integer(row.cpo)}</td><td>${percent(row.cvr)}</td><td>${percent(row.roas, 0)}</td></tr>`).join('');
+  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${points[0].metricDate} ~ ${points.at(-1).metricDate} 광고비와 매출 추이">${[0,1,2,3,4].map(index => `<line class="daily-grid" x1="${left}" y1="${top + plotHeight * index / 4}" x2="${width-right}" y2="${top + plotHeight * index / 4}"/>`).join('')}${points.map((row, index) => { if (row.cost == null) return ''; const barHeight = plotHeight * row.cost / maxCost; return `<rect class="daily-media-cost-bar" x="${left + step * index + step * .2}" y="${top + plotHeight - barHeight}" width="${step * .6}" height="${barHeight}" rx="3"/>`; }).join('')}<path class="daily-media-revenue-line" d="${revenuePath}"/>${points.map((row,index) => row.revenue == null ? '' : `<circle class="daily-media-revenue-point" cx="${x(index)}" cy="${revenueY(row.revenue)}" r="3"/>`).join('')}${points.map((row,index) => index % labelInterval === 0 || index === points.length - 1 ? `<text class="daily-label" x="${x(index)}" y="${height-8}" text-anchor="middle">${Number(row.metricDate.slice(5,7))}/${Number(row.metricDate.slice(8,10))}</text>` : '').join('')}</svg>`;
+  const integer = value => formatMediaValue(value);
+  const percent = (value, digits = 2) => formatMediaValue(value, digits);
+  body.innerHTML = rows.map(row => `<tr class="media-result-row"><td><strong>${row.metricDate.slice(2).replaceAll('-', '/')}</strong></td><td>${integer(row.cost)}</td><td>${integer(row.impressions)}</td><td>${integer(row.clicks)}</td><td>${integer(row.views)}</td><td>${integer(row.cpm)}</td><td>${integer(row.cpc)}</td><td>${integer(row.cpv)}</td><td>${percent(row.ctr)}</td><td>${percent(row.vtr)}</td><td>${integer(row.purchases)}</td><td>${integer(row.revenue)}</td>${isTestReport() ? '' : `<td>${integer(row.cpo)}</td>`}<td>${percent(row.cvr)}</td><td>${percent(row.roas, 0)}</td>${gaConversionCells(row)}</tr>`).join('');
 }
 
-function openMediaDetailDialog(mediaAdType) {
+const creativeHighlightsByKpi = new Map([
+  ['도달', ['cpm']],
+  ['조회', ['cpv', 'vtr']],
+  ['트래픽', ['cpc', 'ctr']],
+  ['전환', ['roas']],
+]);
+
+function openMediaDetailDialog(mediaAdType, kpi) {
   const dialog = document.querySelector('#media-detail-dialog');
   const groupRows = latestMediaDetailRows.filter(row => row.mediaAdType === mediaAdType);
   const dailySource = latestMediaDailyRows.filter(row => row.mediaAdType === mediaAdType);
@@ -483,14 +646,14 @@ function openMediaDetailDialog(mediaAdType) {
     historyByDate.get(row.date).push(row.history);
   });
   if (!groupRows.length) return;
-  const integer = value => number.format(Math.round(Number(value) || 0));
-  const percent = (value, digits = 2) => `${Number(value || 0).toFixed(digits)}%`;
-  const calculate = row => ({ ...row, cpm: row.impressions ? row.cost / row.impressions * 1000 : 0, cpc: row.clicks ? row.cost / row.clicks : 0, cpv: row.views ? row.cost / row.views : 0, ctr: row.impressions ? row.clicks / row.impressions * 100 : 0, vtr: row.impressions ? row.views / row.impressions * 100 : 0, cpo: row.purchases ? row.cost / row.purchases : 0, cvr: row.clicks ? row.purchases / row.clicks * 100 : 0, roas: row.cost ? row.revenue / row.cost * 100 : 0 });
+  const integer = value => formatMediaValue(value);
+  const percent = (value, digits = 2) => formatMediaValue(value, digits);
+  const calculate = row => isTestReport() ? withMediaRates(row) : ({ ...row, cpm: row.impressions ? row.cost / row.impressions * 1000 : 0, cpc: row.clicks ? row.cost / row.clicks : 0, cpv: row.views ? row.cost / row.views : 0, ctr: row.impressions ? row.clicks / row.impressions * 100 : 0, vtr: row.impressions ? row.views / row.impressions * 100 : 0, cpo: row.purchases ? row.cost / row.purchases : 0, cvr: row.clicks ? row.purchases / row.clicks * 100 : 0, roas: row.cost ? row.revenue / row.cost * 100 : 0 });
   const dailyMap = new Map();
   dailySource.forEach(row => {
-    if (!dailyMap.has(row.metricDate)) dailyMap.set(row.metricDate, { metricDate: row.metricDate, cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+    if (!dailyMap.has(row.metricDate)) dailyMap.set(row.metricDate, { metricDate: row.metricDate, ...mediaTotalsForView() });
     const daily = dailyMap.get(row.metricDate);
-    ['cost', 'impressions', 'clicks', 'views', 'purchases', 'revenue'].forEach(key => { daily[key] += Number(row[key]) || 0; });
+    addMediaTotals(daily, row);
   });
   const dailyRows = [...dailyMap.values()].map(calculate).sort((a, b) => a.metricDate.localeCompare(b.metricDate));
   const first = groupRows[0];
@@ -498,17 +661,18 @@ function openMediaDetailDialog(mediaAdType) {
   document.querySelector('#media-detail-dialog-subtitle').textContent = `${mediaAdType} · 전일까지 누적 및 일자별 실적`;
   document.querySelector('#media-dialog-daily-body').innerHTML = dailyRows.length ? dailyRows.map(row => {
     const histories = historyByDate.get(row.metricDate) ?? [];
-    const historyRow = histories.length ? `<tr class="media-history-row"><td colspan="15"><span>히스토리</span>${histories.map(history => `<p>${escapeHtml(history)}</p>`).join('')}</td></tr>` : '';
-    return `<tr><td><strong>${row.metricDate.slice(2).replaceAll('-', '/')}</strong></td><td>${integer(row.cost)}</td><td>${integer(row.impressions)}</td><td>${integer(row.clicks)}</td><td>${integer(row.views)}</td><td>${integer(row.cpm)}</td><td>${integer(row.cpc)}</td><td>${integer(row.cpv)}</td><td>${percent(row.ctr)}</td><td>${percent(row.vtr)}</td><td>${integer(row.purchases)}</td><td>${integer(row.revenue)}</td><td>${integer(row.cpo)}</td><td>${percent(row.cvr)}</td><td>${percent(row.roas, 0)}</td></tr>${historyRow}`;
-  }).join('') : '<tr><td colspan="15" class="empty-state">해당 매체의 일자별 데이터가 없습니다.</td></tr>';
+    const historyRow = histories.length ? `<tr class="media-history-row"><td colspan="${isTestReport() ? 14 : 15}"><span>히스토리</span>${histories.map(history => `<p>${escapeHtml(history)}</p>`).join('')}</td></tr>` : '';
+    return `<tr><td><strong>${row.metricDate.slice(2).replaceAll('-', '/')}</strong></td><td>${integer(row.cost)}</td><td>${integer(row.impressions)}</td><td>${integer(row.clicks)}</td><td>${integer(row.views)}</td><td>${integer(row.cpm)}</td><td>${integer(row.cpc)}</td><td>${integer(row.cpv)}</td><td>${percent(row.ctr)}</td><td>${percent(row.vtr)}</td><td>${integer(row.purchases)}</td><td>${integer(row.revenue)}</td>${isTestReport() ? '' : `<td>${integer(row.cpo)}</td>`}<td>${percent(row.cvr)}</td><td>${percent(row.roas, 0)}</td></tr>${historyRow}`;
+  }).join('') : `<tr><td colspan="${isTestReport() ? 14 : 15}" class="empty-state">해당 매체의 일자별 데이터가 없습니다.</td></tr>`;
   const creativeMap = new Map();
   creativeSource.forEach(row => {
-    if (!creativeMap.has(row.adName)) creativeMap.set(row.adName, { adName: row.adName, cost: 0, impressions: 0, clicks: 0, views: 0, purchases: 0, revenue: 0 });
+    if (!creativeMap.has(row.adName)) creativeMap.set(row.adName, { adName: row.adName, ...mediaTotalsForView() });
     const creative = creativeMap.get(row.adName);
-    ['cost', 'impressions', 'clicks', 'views', 'purchases', 'revenue'].forEach(key => { creative[key] += Number(row[key]) || 0; });
+    addMediaTotals(creative, row);
   });
   const creativeRows = [...creativeMap.values()].map(calculate);
   dialogCreativeRows = creativeRows;
+  dialogCreativeHighlights = isTestReport() ? (creativeHighlightsByKpi.get(kpi) ?? []) : ['cpv', 'ctr', 'roas'];
   creativeSort = { key: 'cost', direction: 'desc' };
   renderDialogCreativeTable();
   const totalKeys = [['cost', '광고비'], ['impressions', '노출'], ['clicks', '클릭'], ['views', '조회'], ['purchases', '구매수'], ['revenue', '총수익']];
@@ -530,8 +694,10 @@ function openMediaDetailDialog(mediaAdType) {
 }
 
 function renderDialogCreativeTable() {
-  const integer = value => number.format(Math.round(Number(value) || 0));
-  const percent = (value, digits = 2) => `${Number(value || 0).toFixed(digits)}%`;
+  const integer = value => formatMediaValue(value);
+  const percent = (value, digits = 2) => formatMediaValue(value, digits);
+  const highlighted = key => dialogCreativeHighlights.includes(key);
+  const metricCell = (key, value) => `<td${highlighted(key) ? ' class="metric-highlight"' : ''}>${value}</td>`;
   const direction = creativeSort.direction === 'asc' ? 1 : -1;
   const rows = [...dialogCreativeRows].sort((a, b) => {
     const comparison = creativeSort.key === 'adName'
@@ -541,9 +707,10 @@ function renderDialogCreativeTable() {
   });
   document.querySelectorAll('#media-dialog-creative-table th[data-sort-key]').forEach(header => {
     const active = header.dataset.sortKey === creativeSort.key;
+    header.classList.toggle('metric-highlight', highlighted(header.dataset.sortKey));
     header.setAttribute('aria-sort', active ? (creativeSort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
   });
-  document.querySelector('#media-dialog-creative-body').innerHTML = rows.length ? rows.map(row => `<tr><td><strong>${escapeHtml(row.adName)}</strong></td><td>${integer(row.cost)}</td><td>${integer(row.impressions)}</td><td>${integer(row.clicks)}</td><td>${integer(row.views)}</td><td>${integer(row.cpm)}</td><td>${integer(row.cpc)}</td><td class="metric-highlight">${integer(row.cpv)}</td><td class="metric-highlight">${percent(row.ctr)}</td><td>${percent(row.vtr)}</td><td>${integer(row.purchases)}</td><td>${integer(row.revenue)}</td><td>${integer(row.cpo)}</td><td>${percent(row.cvr)}</td><td class="metric-highlight">${percent(row.roas, 0)}</td></tr>`).join('') : '<tr><td colspan="15" class="empty-state">해당 매체의 광고소재 데이터가 없습니다.</td></tr>';
+  document.querySelector('#media-dialog-creative-body').innerHTML = rows.length ? rows.map(row => `<tr><td><strong>${escapeHtml(row.adName)}</strong></td><td>${integer(row.cost)}</td><td>${integer(row.impressions)}</td><td>${integer(row.clicks)}</td><td>${integer(row.views)}</td>${metricCell('cpm', integer(row.cpm))}${metricCell('cpc', integer(row.cpc))}${metricCell('cpv', integer(row.cpv))}${metricCell('ctr', percent(row.ctr))}${metricCell('vtr', percent(row.vtr))}<td>${integer(row.purchases)}</td><td>${integer(row.revenue)}</td>${isTestReport() ? '' : `<td>${integer(row.cpo)}</td>`}<td>${percent(row.cvr)}</td>${metricCell('roas', percent(row.roas, 0))}</tr>`).join('') : `<tr><td colspan="${isTestReport() ? 14 : 15}" class="empty-state">해당 매체의 광고소재 데이터가 없습니다.</td></tr>`;
 }
 
 function renderBusinessProgress(progress = [], rows = []) {
@@ -556,16 +723,16 @@ function renderBusinessProgress(progress = [], rows = []) {
   });
   const values = progress.length ? progress : fallback;
   const definitions = [
-    ['cost', '광고비'], ['impressions', '노출'], ['clicks', '클릭'], ['views', '조회'], ['revenue', '총수익'],
+    ['cost', '광고비'], ['impressions', '노출'], ['clicks', '클릭'], ['views', '조회'], ['revenue', isTestReport() ? '총수익(매체)' : '총수익'],
   ];
-  const formatValue = value => number.format(Math.round(value));
+  const formatValue = value => formatMediaValue(value);
   container.innerHTML = values.map(item => {
-    const dateLabel = item.dateProgress === null ? '재시작 후 계산' : `${Math.round(item.dateProgress)}%`;
+    const dateLabel = item.dateProgress === null ? (isTestReport() ? '–' : '재시작 후 계산') : `${Math.round(item.dateProgress)}%`;
     const color = item.business === 'MKT' ? '#48d9ff' : '#ff8ca2';
     const metrics = definitions.map(([key, label]) => {
-      const rate = item.rates[key] ?? 0;
-      const width = Math.min(100, Math.max(0, rate));
-      return `<div title="실적 ${formatValue(item.actual[key])} / 목표 ${formatValue(item.target[key])}"><span>${label} <b>${rate.toFixed(0)}%</b></span><i><em style="--progress:${width}%"></em></i></div>`;
+      const rate = item.rates[key];
+      const width = Math.min(100, Math.max(0, rate ?? 0));
+      return `<div title="실적 ${formatValue(item.actual[key])} / 목표 ${formatValue(item.target[key])}"><span>${label} <b>${formatMediaValue(isTestReport() ? rate : rate ?? 0, 0)}</b></span><i><em style="--progress:${width}%"></em></i></div>`;
     }).join('');
     return `<article class="business-progress-card"><div class="business-card-head"><span><i style="background:${color}"></i>${item.business}</span><strong>날짜 진척률 ${dateLabel}</strong></div><div class="business-metrics"><div class="date-progress-metric"><span>날짜 진척률 <b>${dateLabel}</b></span><i><em style="--progress:${item.dateProgress === null ? 0 : item.dateProgress}%"></em></i></div>${metrics}</div></article>`;
   }).join('');
@@ -573,10 +740,13 @@ function renderBusinessProgress(progress = [], rows = []) {
 
 function renderGoalKpiGaps(rows = []) {
   const container = document.querySelector('#goal-kpi-grid');
+  const trafficMetric = isTestReport()
+    ? { metric: 'cpc', metricLabel: 'CPC', unit: 'currency' }
+    : { metric: 'ctr', metricLabel: 'CTR', unit: 'percent' };
   const definitions = [
     { kpi: '도달', label: 'REACH', metric: 'cpm', metricLabel: 'CPM', color: '#48d9ff', unit: 'currency' },
     { kpi: '조회', label: 'VIEW', metric: 'cpv', metricLabel: 'CPV', color: '#a99eff', unit: 'currency' },
-    { kpi: '트래픽', label: 'TRAFFIC', metric: 'ctr', metricLabel: 'CTR', color: '#ff8ca2', unit: 'percent' },
+    { kpi: '트래픽', label: 'TRAFFIC', color: '#ff8ca2', ...trafficMetric },
     { kpi: '전환', label: 'CONVERSION', metric: 'roas', metricLabel: 'ROAS', color: '#62e2c2', unit: 'percent' },
   ];
   const aggregate = goalRows => goalRows.reduce((sum, row) => {
@@ -589,14 +759,17 @@ function renderGoalKpiGaps(rows = []) {
     ctr: values.impressions ? values.clicks / values.impressions * 100 : 0,
     roas: values.cost ? values.revenue / values.cost * 100 : 0,
   })[metric];
-  const format = (value, definition) => definition.unit === 'currency' ? `${number.format(Math.round(value))}원` : `${value.toFixed(definition.metric === 'roas' ? 0 : 2)}%`;
+  const format = (value, definition) => value == null ? '–' : definition.unit === 'currency' ? `${number.format(Math.round(value))}원` : `${value.toFixed(definition.metric === 'roas' ? 0 : 2)}%`;
   container.innerHTML = definitions.map(definition => {
-    const values = aggregate(rows.filter(row => row.kpi === definition.kpi));
-    const target = metricValue(definition.metric, values.target);
-    const actual = metricValue(definition.metric, values.actual);
+    const goalRows = rows.filter(row => row.kpi === definition.kpi);
+    const values = isTestReport()
+      ? { actual: withMediaRates(goalRows.reduce(addMediaTotals, { ...blankMediaTotals })), target: withMediaRates(goalRows.map(row => row.target).reduce(addMediaTotals, { ...blankMediaTotals })) }
+      : aggregate(goalRows);
+    const target = isTestReport() ? values.target[definition.metric] : metricValue(definition.metric, values.target);
+    const actual = isTestReport() ? values.actual[definition.metric] : metricValue(definition.metric, values.actual);
     const gap = actual - target;
     const sign = gap > 0 ? '+' : gap < 0 ? '−' : '';
-    const gapValue = definition.unit === 'currency' ? `${sign}${number.format(Math.round(Math.abs(gap)))}원` : `${sign}${Math.abs(gap).toFixed(definition.metric === 'roas' ? 0 : 2)}%p`;
+    const gapValue = actual == null || target == null ? '–' : definition.unit === 'currency' ? `${sign}${number.format(Math.round(Math.abs(gap)))}원` : `${sign}${Math.abs(gap).toFixed(definition.metric === 'roas' ? 0 : 2)}%p`;
     return `<article style="--goal-color:${definition.color}"><div class="goal-kpi-top"><span>${definition.label} · ${definition.metricLabel}</span></div><div class="goal-kpi-value"><strong>${gapValue}</strong></div><div class="goal-kpi-meta"><span>목표 <b>${format(target, definition)}</b></span><span>달성 <b>${format(actual, definition)}</b></span></div></article>`;
   }).join('');
 }
@@ -697,13 +870,20 @@ function renderWeeklyGaTable(rows = []) {
 
 function renderCampaignTrend(rows) {
   const chart = document.querySelector('#campaign-trend-chart');
+  const selectedTrendMetrics = reportTrendMetrics();
   if (!rows.length || !selectedTrendMetrics.length) {
     chart.innerHTML = `<p class="empty-state">${rows.length ? '표시할 지표 카드를 선택하세요.' : '선택한 조건의 추이 데이터가 없습니다.'}</p>`;
     document.querySelector('#trend-series-legend').innerHTML = '';
     return;
   }
-  const sumKeys = ['impressions', 'clicks', 'views', 'cost', 'conversions', 'revenue'];
-  const calculateDerived = item => ({
+  const sumKeys = ['impressions', 'clicks', 'views', 'cost', 'conversions', 'revenue', 'mediaRevenue', 'sessions', 'users'];
+  const calculateDerived = item => isTestReport() ? {
+    ...item, cpm: mediaRatio(item.cost, item.impressions, 1000), ctr: mediaRatio(item.clicks, item.impressions, 100),
+    cpc: mediaRatio(item.cost, item.clicks),
+    cpv: mediaRatio(item.cost, item.views), purchaseRate: mediaRatio(item.conversions, item.clicks, 100),
+    cpo: mediaRatio(item.cost, item.conversions), roas: mediaRatio(item.revenue, item.cost, 100),
+    mediaRoas: mediaRatio(item.mediaRevenue, item.cost, 100),
+  } : ({
     ...item,
     cpm: item.impressions ? item.cost / item.impressions * 1000 : 0,
     ctr: item.impressions ? item.clicks / item.impressions * 100 : 0,
@@ -721,9 +901,9 @@ function renderCampaignTrend(rows) {
       const date = new Date(`${row.date}T00:00:00`);
       const monday = addDays(date, -(date.getDay() === 0 ? 6 : date.getDay() - 1));
       const key = toInputDate(monday);
-      if (!weeks.has(key)) weeks.set(key, { date: key, impressions: 0, clicks: 0, views: 0, cost: 0, conversions: 0, revenue: 0 });
+      if (!weeks.has(key)) weeks.set(key, { date: key, ...Object.fromEntries(sumKeys.map(metric => [metric, isTestReport() ? null : 0])) });
       const week = weeks.get(key);
-      sumKeys.forEach(metric => { week[metric] += row[metric]; });
+      sumKeys.forEach(metric => { if (row[metric] != null) week[metric] = (week[metric] ?? 0) + row[metric]; });
     });
     points = [...weeks.values()].slice(-13).map(calculateDerived);
   }
@@ -735,23 +915,24 @@ function renderCampaignTrend(rows) {
   const width = 780, height = 125, left = 34, right = 24, top = 10, bottom = 20;
   const step = points.length > 1 ? (width - left - right) / (points.length - 1) : 0;
   const plotStartX = points.length > 1 ? left : (left + width - right) / 2;
+  const definitions = reportKpiDefinitions();
   const series = selectedTrendMetrics.map((key, seriesIndex) => {
-    const definition = campaignKpiDefinitions.find(item => item.key === key);
+    const definition = definitions.find(item => item.key === key);
     const values = points.map(point => point[key]);
     const max = Math.max(...values) * 1.08 || 1;
     return { ...definition, values, max, color: trendColors[seriesIndex] };
   });
-  const displayRatios = separateTrendLines(series);
+  const displayRatios = isTestReport() ? series.map(item => item.values.map(value => value == null ? null : value / item.max)) : separateTrendLines(series);
   series.forEach((item, seriesIndex) => {
     item.displayRatios = displayRatios[seriesIndex];
-    item.path = item.displayRatios.map((ratio, index) => `${index ? 'L' : 'M'} ${plotStartX + index * step} ${top + (height-top-bottom) * (1-ratio)}`).join(' ');
+    item.path = item.displayRatios.map((ratio, index) => ratio == null ? '' : `${index && item.displayRatios[index - 1] != null ? 'L' : 'M'} ${plotStartX + index * step} ${top + (height-top-bottom) * (1-ratio)}`).join(' ');
   });
   document.querySelector('#trend-series-legend').innerHTML = series.map(item => `<span style="--series-color:${item.color}"><i></i><b>${item.label}</b></span>`).join('');
   const ariaValue = (item, index) => `${item.label} ${formatTrendValue(item.key, item.values[index])}`;
   const hitWidth = points.length > 1 ? step : width - left - right;
   const labelInterval = Math.max(1, Math.ceil(labels.length / 7));
   const axisLabels = labels.map((label, index) => index % labelInterval === 0 || index === labels.length - 1 ? `<text class="daily-label" x="${plotStartX+index*step}" y="${height-7}" text-anchor="middle">${label}</text>` : '').join('');
-  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${series.map(item => item.label).join(', ')} 추이">${[0,1,2,3,4].map(i => `<line class="daily-grid" x1="${left}" y1="${top+i*(height-top-bottom)/4}" x2="${width-right}" y2="${top+i*(height-top-bottom)/4}"/>`).join('')}<line class="campaign-hover-line" x1="0" y1="${top}" x2="0" y2="${height-bottom}"/>${series.map(item => `<path class="campaign-series-line" style="--series-color:${item.color}" d="${item.path}"/>${item.values.map((value,index) => `<circle class="campaign-series-point" style="--series-color:${item.color}" cx="${plotStartX+index*step}" cy="${top+(height-top-bottom)*(1-item.displayRatios[index])}" r="3"/>`).join('')}`).join('')}${axisLabels}${labels.map((label,index) => `<rect class="campaign-chart-hit" x="${points.length === 1 ? left : Math.max(0, plotStartX+index*step-step/2)}" y="${top}" width="${points.length === 1 ? hitWidth : index === 0 || index === labels.length-1 ? step/2+18 : step}" height="${height-top-bottom}" tabindex="0" data-index="${index}" aria-label="${label}, ${series.map(item => ariaValue(item,index)).join(', ')}"/>`).join('')}</svg><div class="campaign-chart-tooltip" role="status"></div>`;
+  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${series.map(item => item.label).join(', ')} 추이">${[0,1,2,3,4].map(i => `<line class="daily-grid" x1="${left}" y1="${top+i*(height-top-bottom)/4}" x2="${width-right}" y2="${top+i*(height-top-bottom)/4}"/>`).join('')}<line class="campaign-hover-line" x1="0" y1="${top}" x2="0" y2="${height-bottom}"/>${series.map(item => `<path class="campaign-series-line" style="--series-color:${item.color}" d="${item.path}"/>${item.values.map((value,index) => value == null ? '' : `<circle class="campaign-series-point" style="--series-color:${item.color}" cx="${plotStartX+index*step}" cy="${top+(height-top-bottom)*(1-item.displayRatios[index])}" r="3"/>`).join('')}`).join('')}${axisLabels}${labels.map((label,index) => `<rect class="campaign-chart-hit" x="${points.length === 1 ? left : Math.max(0, plotStartX+index*step-step/2)}" y="${top}" width="${points.length === 1 ? hitWidth : index === 0 || index === labels.length-1 ? step/2+18 : step}" height="${height-top-bottom}" tabindex="0" data-index="${index}" aria-label="${label}, ${series.map(item => ariaValue(item,index)).join(', ')}"/>`).join('')}</svg><div class="campaign-chart-tooltip" role="status"></div>`;
   bindCampaignTrendTooltip(series, labels, { width, left: plotStartX, step });
 }
 
@@ -784,7 +965,9 @@ function separateTrendLines(series) {
 }
 
 function formatTrendValue(key, value) {
-  if (['ctr', 'purchaseRate', 'roas'].includes(key)) return `${value.toFixed(key === 'roas' ? 0 : 2)}%`;
+  if (value == null) return '–';
+  if (['roas', 'mediaRoas'].includes(key)) return `${value.toFixed(0)}%`;
+  if (['ctr', 'purchaseRate'].includes(key)) return `${value.toFixed(2)}%`;
   return number.format(Math.round(value));
 }
 
@@ -813,8 +996,13 @@ function bindCampaignTrendTooltip(series, labels, dimensions) {
 }
 
 function toggleTrendMetric(key) {
-  if (selectedTrendMetrics.includes(key)) selectedTrendMetrics = selectedTrendMetrics.filter(item => item !== key);
-  else selectedTrendMetrics = [...selectedTrendMetrics.slice(-2), key];
+  const selected = reportTrendMetrics();
+  const selectedIndex = selected.indexOf(key);
+  if (selectedIndex >= 0) selected.splice(selectedIndex, 1);
+  else {
+    if (selected.length === 3) selected.shift();
+    selected.push(key);
+  }
   renderCampaignReport();
 }
 
@@ -823,8 +1011,40 @@ function updatePeriodStackVisibility() {
   stack.hidden = [...stack.querySelectorAll('.period-control')].every(control => control.hidden);
 }
 
+const isTestReport = (hash = window.location.hash) => hash === '#test-report';
+const isCampaignReport = (hash = window.location.hash) => hash === '#campaign-report' || isTestReport(hash);
+
 function showReportView(hash = window.location.hash) {
-  const campaignMode = hash === '#campaign-report';
+  const campaignMode = isCampaignReport(hash);
+  const testMode = isTestReport(hash);
+  const report = document.querySelector('#campaign-report');
+  const changedSource = (report.dataset.testMode === 'true') !== testMode;
+  report.dataset.testMode = String(testMode);
+  document.querySelectorAll('[data-report-cpo]').forEach(header => { header.hidden = testMode; });
+  document.querySelectorAll('[data-report-purchase-group]').forEach(header => { header.colSpan = testMode ? testPurchaseColumns.length : purchaseColumns.length; });
+  document.querySelector('#test-report-data-label').hidden = !testMode;
+  document.querySelector('#campaign-report-title').textContent = testMode ? '테스트 리포트' : '캠페인 성과 리포트';
+  const salesRule = 'SALES는 미디어믹스에 등록된 다른 캠페인명이 원본 이름에 없는 실적입니다. 캠페인 목록이 바뀌면 집계 대상도 바뀝니다.';
+  document.querySelector('#campaign-summary-description').textContent = testMode ? salesRule : '캠페인별 핵심 성과를 비교하고 흐름을 확인하세요. · 목업 데이터';
+  document.querySelector('#campaign-media-description').textContent = testMode ? `–는 원본 데이터 미수집을 뜻합니다. ${salesRule}` : '매체별 성과를 요약·주차·일자 기준으로 확인하세요. · 목업 데이터';
+  if (changedSource) {
+    ++campaignMetricRequestId;
+    ++campaignMediaTableRequestId;
+    latestWeeklyGaRows = [];
+    document.querySelector('#campaign-media-detail-body').innerHTML = '';
+    latestWeeklyMediaRows = [];
+    latestWeeklyMediaTotal = {};
+    latestWeeklyMediaBusinessProgress = [];
+    latestMediaDetailRows = [];
+    latestMediaDailyRows = [];
+    latestMediaCreativeRows = [];
+    latestMediaHistoryRows = [];
+    renderBusinessProgress([], []);
+    renderGoalKpiGaps([]);
+    renderWeeklyMediaTable();
+    renderDailyMediaPerformance([]);
+    if (mediaDetailDialog.open) mediaDetailDialog.close();
+  }
   const mediaProductMode = hash === '#media-product-report';
   const gaReportMode = hash === '#ga-report';
   const mediaTabActive = document.querySelector('[data-report-tab="media"]')?.classList.contains('active');
@@ -832,7 +1052,7 @@ function showReportView(hash = window.location.hash) {
   document.querySelector('#overview-view').hidden = campaignMode || mediaProductMode || gaReportMode;
   document.querySelector('#media-product-report').hidden = !mediaProductMode;
   document.querySelector('#ga-report').hidden = !gaReportMode;
-  document.querySelector('#campaign-report').hidden = !campaignMode;
+  report.hidden = !campaignMode;
   const pageHeader = document.querySelector('.page-header');
   pageHeader.querySelector(':scope > div:first-child').hidden = true;
   document.querySelector('#campaign-global-filter').hidden = !campaignMode;
@@ -842,11 +1062,13 @@ function showReportView(hash = window.location.hash) {
   document.querySelector('#campaign-unavailable-period').hidden = !campaignMode || !mixTabActive;
   updatePeriodStackVisibility();
   pageHeader.classList.toggle('campaign-period-header', campaignMode);
-  document.querySelectorAll('.sidebar nav a').forEach(link => link.classList.toggle('active', campaignMode ? link.hash === '#campaign-report' : mediaProductMode ? link.hash === '#media-product-report' : gaReportMode ? link.hash === '#ga-report' : link.hash === (hash || '#overview')));
+  document.querySelectorAll('.sidebar nav a').forEach(link => link.classList.toggle('active', link.hash === (hash || '#overview')));
+  if (hash === '#overview' || (!hash && changedSource)) render();
   if (mediaProductMode) renderMediaProductReport();
   if (gaReportMode) renderGaReport();
   if (campaignMode) {
-    renderCampaignReport();
+    if (campaignOptionsMode !== testMode) loadCampaignOptions();
+    else renderCampaignReport();
     window.requestAnimationFrame(updateCampaignStickyOffsets);
   }
 }
@@ -861,7 +1083,7 @@ function updateCampaignStickyOffsets() {
 
 function showCampaignTab(tab, { load = true, persist = true } = {}) {
   if (!['summary', 'media', 'creative', 'mix'].includes(tab)) tab = 'summary';
-  const campaignMode = window.location.hash === '#campaign-report';
+  const campaignMode = isCampaignReport();
   const summary = tab === 'summary';
   const media = tab === 'media';
   const creative = tab === 'creative';
@@ -893,11 +1115,17 @@ function showCampaignTab(tab, { load = true, persist = true } = {}) {
   if (persist) saveCampaignReportState({ tab });
 }
 
+const creativeMediaOptions = campaign => getAvailableMedia(
+  isTestReport() ? campaignFilterRows.filter(row => row.target) : campaignFilterRows,
+  campaign,
+  'all',
+);
+
 function updateCreativeUploadState() {
   const campaign = document.querySelector('#campaign-select').value;
   const mediaSelect = document.querySelector('#creative-media');
   const previousMedia = mediaSelect.value;
-  const mediaOptions = campaign && campaign !== 'all' ? getAvailableMedia(campaignFilterRows, campaign, 'all') : [];
+  const mediaOptions = campaign && campaign !== 'all' ? creativeMediaOptions(campaign) : [];
   mediaSelect.replaceChildren();
   if (mediaOptions.length) {
     mediaOptions.forEach(media => {
@@ -1030,7 +1258,7 @@ function openCreativeEditor(id) {
   const creative = currentCampaignCreatives.find(item => item.id === id);
   if (!creative) return;
   const mediaSelect = document.querySelector('#creative-edit-media');
-  const mediaOptions = getAvailableMedia(campaignFilterRows, creative.campaign, 'all');
+  const mediaOptions = creativeMediaOptions(creative.campaign);
   mediaSelect.replaceChildren(...mediaOptions.map(media => {
     const option = document.createElement('option');
     option.value = media;
@@ -1184,11 +1412,21 @@ async function loadCampaignMediaMix() {
   }
 }
 
+let campaignOptionsRequestId = 0;
+let campaignOptionsMode;
+
 async function loadCampaignOptions() {
+  const requestId = ++campaignOptionsRequestId;
+  const testMode = isTestReport();
   const select = document.querySelector('#campaign-select');
+  const savedCampaign = savedCampaignReportState.campaign;
+  campaignOptionsMode = undefined;
+  select.disabled = true;
+  select.innerHTML = '<option value="all">캠페인 불러오는 중…</option>';
   try {
-    const response = await fetch('/api/campaigns', { headers: { Accept: 'application/json' } });
-    const result = await response.json();
+    const response = await fetch(testMode ? '/api/test-report-campaigns' : '/api/campaigns', { headers: { Accept: 'application/json' } });
+    const result = await readJsonResponse(response);
+    if (requestId !== campaignOptionsRequestId || testMode !== isTestReport()) return;
     if (!response.ok) throw new Error(result.error || '캠페인 목록을 불러오지 못했습니다.');
     select.innerHTML = [
       '<option value="all">전체 캠페인</option>',
@@ -1200,16 +1438,22 @@ async function loadCampaignOptions() {
       }),
     ].join('');
     select.disabled = false;
+    select.removeAttribute('title');
     campaignFilterRows = result.filterRows ?? [];
     legacyCampaignMediaOptions = result.mediaAdTypes ?? [];
-    const savedCampaign = savedCampaignReportState.campaign;
     select.value = [...select.options].some(option => option.value === savedCampaign) ? savedCampaign : 'all';
+    campaignOptionsMode = testMode;
     updateCampaignDrilldown('campaign');
-    showCampaignTab(savedCampaignReportState.tab || 'summary');
+    showCampaignTab(document.querySelector('[data-report-tab].active')?.dataset.reportTab || 'summary');
   } catch (error) {
+    if (requestId !== campaignOptionsRequestId || testMode !== isTestReport()) return;
     select.innerHTML = '<option value="all">캠페인 조회 실패</option>';
     select.disabled = true;
     select.title = error.message;
+    if (testMode) {
+      renderCampaignReport();
+      if (document.querySelector('[data-report-tab="media"]').classList.contains('active')) loadCampaignMediaTable();
+    }
   }
 }
 
@@ -1594,10 +1838,10 @@ function applyPeriod() {
   updateComparisonPeriodLabel();
   if (window.location.hash === '#media-product-report') renderMediaProductReport();
   else if (window.location.hash === '#ga-report') renderGaReport();
-  else render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
+  else if (!isTestReport()) render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
   renderCampaignReport();
   closePeriodPicker();
-  if (window.location.hash === '#campaign-report') saveCampaignReportState();
+  if (isCampaignReport()) saveCampaignReportState();
 }
 
 function getDateRangeDayCount(startInput = startDate, endInput = endDate) {
@@ -1637,7 +1881,7 @@ document.querySelector('#comparison-period-apply').addEventListener('click', () 
   updateComparisonPeriodLabel();
   if (window.location.hash === '#media-product-report') renderMediaProductReport();
   else if (window.location.hash === '#ga-report') renderGaReport();
-  else render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
+  else if (!isTestReport()) render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
   closeComparisonPeriodPicker();
 });
 document.querySelector('#comparison-period-cancel').addEventListener('click', closeComparisonPeriodPicker);
@@ -1650,7 +1894,9 @@ document.querySelectorAll('.media-filter button').forEach(button => button.addEv
   document.querySelectorAll('.media-filter button').forEach(item => item.classList.toggle('active', item === button));
   render(['yesterday', '7'].includes(selectedPreset) ? '7' : '30');
 }));
-document.querySelectorAll('.sidebar nav a').forEach(link => link.addEventListener('click', () => window.setTimeout(() => showReportView(link.hash), 0)));
+document.querySelectorAll('.sidebar nav a').forEach(link => link.addEventListener('click', () => {
+  if (link.hash === window.location.hash) showReportView(link.hash);
+}));
 document.querySelector('#campaign-select').addEventListener('change', () => {
   updateCampaignDrilldown('campaign');
   const activeTab = document.querySelector('[data-report-tab].active')?.dataset.reportTab || 'summary';
@@ -1806,13 +2052,22 @@ document.querySelectorAll('[data-weekly-media-view]').forEach(button => button.a
   document.querySelectorAll('[data-weekly-media-view]').forEach(item => item.classList.toggle('active', item === button));
   renderWeeklyMediaTable();
 }));
+const weeklyMediaUnitButtons = document.querySelectorAll('[data-weekly-media-unit]');
+weeklyMediaUnitButtons.forEach(button => button.addEventListener('click', () => {
+  weeklyMediaUnit = button.dataset.weeklyMediaUnit;
+  weeklyMediaUnitButtons.forEach(item => {
+    item.classList.toggle('active', item === button);
+    item.setAttribute('aria-pressed', String(item === button));
+  });
+  renderWeeklyMediaTable();
+}));
 document.querySelector('#campaign-media-detail-body').addEventListener('click', event => {
   const row = event.target.closest('.media-drilldown-row');
-  if (row) openMediaDetailDialog(row.dataset.mediaAdType);
+  if (row) openMediaDetailDialog(row.dataset.mediaAdType, row.dataset.kpi);
 });
 document.querySelector('#campaign-media-detail-body').addEventListener('keydown', event => {
   const row = event.target.closest('.media-drilldown-row');
-  if (row && ['Enter', ' '].includes(event.key)) { event.preventDefault(); openMediaDetailDialog(row.dataset.mediaAdType); }
+  if (row && ['Enter', ' '].includes(event.key)) { event.preventDefault(); openMediaDetailDialog(row.dataset.mediaAdType, row.dataset.kpi); }
 });
 const mediaDetailDialog = document.querySelector('#media-detail-dialog');
 document.querySelector('#media-detail-dialog-close').addEventListener('click', () => mediaDetailDialog.close());
@@ -1836,7 +2091,7 @@ const kstYesterday = new Date(Date.UTC(kstTodayParts.year, kstTodayParts.month -
 document.querySelector('#campaign-fixed-period-date').textContent = `~${String(kstYesterday.getUTCFullYear()).slice(-2)}/${kstYesterday.getUTCMonth() + 1}/${kstYesterday.getUTCDate()}`;
 
 const validStoredDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '');
-if (window.location.hash === '#campaign-report'
+if (isCampaignReport()
   && validStoredDate(savedCampaignReportState.startDate)
   && validStoredDate(savedCampaignReportState.endDate)
   && savedCampaignReportState.startDate <= savedCampaignReportState.endDate) {
@@ -1850,4 +2105,4 @@ applyPeriod();
 updateCampaignDrilldown();
 showCampaignTab(savedCampaignReportState.tab || 'summary', { load: false, persist: false });
 showReportView();
-loadCampaignOptions();
+if (!isCampaignReport()) loadCampaignOptions();
