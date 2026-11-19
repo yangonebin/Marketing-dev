@@ -1,7 +1,32 @@
-const fileId = '1GCuqrC-poeuMnBUbBAnazif_bUQ_rY48';
+const defaultFileId = '1GCuqrC-poeuMnBUbBAnazif_bUQ_rY48';
+export const winterKidsFileId = '12qMzpy1rfYicNyp2UoXasNnnbfYvek-w';
+const winterKidsStartDate = '2026-09-01';
 const driveScope = 'https://www.googleapis.com/auth/drive.readonly';
 const unclassified = '미분류';
 const dimensions = ['campaign', 'business', 'kpi', 'mediaAdType'];
+const excludedMedia = new Map([
+  ['INVISIBLEWHITE', ['카카오 - 미분류', '메타 - 미분류']],
+  ['SKYWEB', ['메타 - 미분류']],
+]);
+const winterKidsPerfMedia = new Map([
+  ['네이버BSA', 'NV - 브랜드검색'],
+  ['네이버SA', 'NV - SA'],
+  ['구글SA', 'YT - SA'],
+  ['모비온', 'MB - 모비온'],
+  ['메타', 'MT - 전환'],
+  ['크리테오', '크리테오'],
+]);
+const salesPerfMedia = new Map([
+  ['네이버 쇼핑검색', 'NV - 쇼핑검색'],
+  ['네이버BSA', 'NV - 브랜드검색'],
+  ['네이버SA', 'NV - SA'],
+  ['모비온', '모비온'],
+  ['크리테오', '크리테오'],
+  ['RTB하우스', 'RTB'],
+  ['토스', '토스페이'],
+  ['메타', 'MT - 전환'],
+  ['구글SA', 'YT - SA'],
+]);
 const columns = {
   cost: '소진금액(수수료포함)', reach: '도달', impressions: '노출', clicks: '링크클릭', views: '조회',
   purchases: '구매전환', revenue: '구매전환매출액', sessions: '세션', gaPurchases: '전환', gaRevenue: '매출액',
@@ -65,7 +90,7 @@ export async function parseReportWorkbook(bytes) {
   return records;
 }
 
-export function createReportSource(getToken) {
+export function createReportSource(getToken, fileId = defaultFileId) {
   let cache;
   let loading;
   return async () => {
@@ -85,7 +110,7 @@ export function createReportSource(getToken) {
   };
 }
 
-export function classifyReport(records, filters) {
+export function classifyReport(records, filters, { winterKidsSource = false } = {}) {
   const plans = new Map();
   for (const row of filters.filterRows) {
     const key = keyOf(row);
@@ -102,6 +127,10 @@ export function classifyReport(records, filters) {
   }
   const campaignKeys = filters.campaigns.map(value => [value, normalize(value)]).filter(([, key]) => key)
     .sort((a, b) => b[1].length - a[1].length);
+  const campaignsByKey = new Map(campaignKeys.map(([campaign, key]) => [key, campaign]));
+  const winterKids = campaignsByKey.get('WINTERKIDS') ?? 'WinterKids';
+  const sales = campaignsByKey.get('SALES') ?? 'SALES';
+  const nonSalesCampaignKeys = campaignKeys.filter(([, key]) => key !== 'SALES');
   const mappingCache = new Map();
   const mapped = records.map(record => {
     const sourceKey = JSON.stringify([record.tab, record.campaignName, record.kpi]);
@@ -109,22 +138,42 @@ export function classifyReport(records, filters) {
     if (!match) {
       const name = record.campaignName.toUpperCase();
       const normalizedName = normalize(name);
-      const campaign = campaignKeys.find(([, key]) => normalizedName.includes(key))?.[0] ?? unclassified;
-      const unit = name.match(/(?:^|_)(MKT|PERF)(?:_|$)/)?.[1];
+      const [, , dateCode, campaignCode] = name.split('_');
+      const namedCampaign = /^\d{6}$/.test(dateCode ?? '') ? campaignsByKey.get(normalize(campaignCode)) : undefined;
+      const campaign = winterKidsSource ? winterKids : (namedCampaign !== sales ? namedCampaign : undefined)
+        ?? nonSalesCampaignKeys.find(([, key]) => normalizedName.includes(key))?.[0] ?? sales;
+      const salesMedia = !winterKidsSource && campaign === sales ? salesPerfMedia.get(record.tab) : undefined;
+      const unit = salesMedia ? 'PERF' : winterKidsSource
+        ? (normalize(campaignCode) === 'WINTERKIDS' ? 'MKT' : 'PERF')
+        : name.match(/(?:^|_)(MKT|PERF)(?:_|$)/)?.[1];
       const candidates = [...plans.values()].filter(row =>
         (campaign === unclassified || row.campaign === campaign) && (!unit || row.business === unit)
         && (filters.mediaFilters[row.mediaAdType] ?? []).some(needle => name.includes(needle)));
       const exact = candidates.filter(row => row.kpi === record.kpi);
-      const plan = campaign !== unclassified ? (exact.length === 1 ? exact[0] : candidates.length === 1 ? candidates[0] : null) : null;
+      const plan = salesMedia ? plans.get(keyOf({ campaign, business: unit, kpi: '전환', mediaAdType: salesMedia }))
+        : campaign !== unclassified ? (exact.length === 1 ? exact[0] : candidates.length === 1 ? candidates[0] : null) : null;
+      const perfMedia = !plan && winterKidsSource && unit === 'PERF' ? winterKidsPerfMedia.get(record.tab) : undefined;
       match = {
-        campaign, business: unit ?? plan?.business ?? unclassified, kpi: plan?.kpi ?? record.kpi,
-        mediaAdType: plan?.mediaAdType ?? `${record.tab} - ${unclassified}`,
+        campaign, business: unit ?? plan?.business ?? unclassified,
+        kpi: plan?.kpi ?? (salesMedia || perfMedia ? '전환' : record.kpi),
+        mediaAdType: plan?.mediaAdType ?? salesMedia ?? perfMedia ?? `${record.tab} - ${unclassified}`,
       };
       mappingCache.set(sourceKey, match);
     }
     return { ...record, ...match };
   });
-  return { plans, records: mapped };
+  const recordsForReport = mapped.filter(row => !excludedMedia.get(normalize(row.campaign))?.includes(row.mediaAdType));
+  return { plans, records: recordsForReport };
+}
+
+export function classifyReportSources(records, winterKidsRecords, filters) {
+  const main = classifyReport(records, filters);
+  const inCampaignPeriod = winterKidsRecords.filter(row => row.date >= winterKidsStartDate);
+  const winterKids = classifyReport(inCampaignPeriod, filters, { winterKidsSource: true });
+  return {
+    plans: main.plans,
+    records: [...main.records.filter(row => normalize(row.campaign) !== 'WINTERKIDS'), ...winterKids.records],
+  };
 }
 
 function group(rows, keys) {
@@ -161,16 +210,22 @@ export function reportOptions({ plans, records }) {
   return { filterRows: rows, campaigns: [...new Set(rows.map(row => row.campaign))], mediaAdTypes: [...new Set(rows.map(row => row.mediaAdType))] };
 }
 
-export function reportSummary(records, { campaign, business, mediaAdTypes, startDate, endDate }) {
-  const filtered = records.filter(row => (campaign === 'all' || row.campaign === campaign)
-    && (business === 'all' || row.business === business) && mediaAdTypes.includes(row.mediaAdType)
-    && row.date >= startDate && row.date <= endDate);
+export function reportSummary({ plans, records }, { campaign, business, mediaAdTypes, startDate, endDate }) {
+  const selected = row => (campaign === 'all' || row.campaign === campaign)
+    && (business === 'all' || row.business === business) && mediaAdTypes.includes(row.mediaAdType);
+  const selectedPlans = [...plans.values()].filter(selected);
+  const filtered = records.filter(row => selected(row) && row.date >= startDate && row.date <= endDate);
+  const goal = rates(sum(selectedPlans.map(row => row.target)));
   const summary = total => {
     const row = rates(total);
-    return { ...row, conversions: row.gaPurchases, revenue: row.gaRevenue, purchaseRate: row.gaCvr, cpo: row.gaCpo, roas: row.gaRoas, users: null };
+    return {
+      ...row, mediaRevenue: row.revenue, mediaRoas: row.roas, conversions: row.gaPurchases,
+      revenue: row.gaRevenue, purchaseRate: row.gaCvr, cpo: row.gaCpo, roas: row.gaRoas, users: null,
+    };
   };
   return {
     metrics: summary(sum(filtered)),
+    target: { ...goal, mediaRevenue: goal.revenue, mediaRoas: goal.roas },
     trend: [...group(filtered, ['date']).values()].sort((a, b) => a.date.localeCompare(b.date)).map(summary),
     weeklyGa: [],
   };
@@ -183,6 +238,7 @@ function monday(date) {
 }
 
 const businessOrder = { MKT: 0, PERF: 1 };
+const mktKpiOrder = new Map([['도달', 0], ['조회', 1], ['트래픽', 2]]);
 
 function mediaOrder(row) {
   const platform = normalize(row.platform);
@@ -192,22 +248,24 @@ function mediaOrder(row) {
   const naver = /^(네이버|NAVER|NV|신제품검색)/.test(platform);
   if (row.business === 'PERF') {
     const matches = pattern => [platform, label].some(value => pattern.test(value));
-    if (naver && matches(/BSA|브랜드검색/)) return 3;
-    if (naver && matches(/쇼핑검색|SHOPPINGSEARCH/)) return 4;
-    if (naver && matches(/^(?:네이버|NAVER|NV)SA$|파워링크/)) return 5;
-    if (google && matches(/^(?:구글|GOOGLE|GG)SA$/)) return 6;
+    if (naver && matches(/BSA|브랜드검색/)) return 0;
+    if (naver && matches(/쇼핑검색|SHOPPINGSEARCH/)) return 1;
+    if (naver && matches(/^(?:네이버|NAVER|NV)SA$|파워링크/)) return 2;
+    if (google && matches(/^(?:구글|GOOGLE|GG)SA$/)) return 3;
   }
-  if (google) return 0;
-  if (meta) return 1;
-  if (naver) return 2;
+  if (google) return 4;
+  if (meta) return 5;
+  if (naver) return 6;
   return 7;
 }
 
 function orderMediaRows(rows) {
   return rows.map(row => ({
-    row, business: businessOrder[row.business] ?? 2, media: mediaOrder(row),
+    row, business: businessOrder[row.business] ?? 2,
+    kpi: row.business === 'MKT' ? (mktKpiOrder.get(row.kpi) ?? 3) : 0,
+    media: mediaOrder(row),
     platform: normalize(row.platform), tie: Math.random(),
-  })).sort((a, b) => a.business - b.business || a.media - b.media
+  })).sort((a, b) => a.business - b.business || a.kpi - b.kpi || a.media - b.media
     || a.platform.localeCompare(b.platform, 'ko') || a.tie - b.tie)
     .map(item => item.row);
 }
@@ -215,12 +273,17 @@ function orderMediaRows(rows) {
 export function reportMediaTable({ plans, records }, { campaign, endDate, mediaHistory }) {
   const selected = row => campaign === 'all' || row.campaign === campaign;
   const actual = records.filter(row => selected(row) && row.date <= endDate).map(row => ({ ...row, metricDate: row.date, weekStart: monday(row.date) }));
-  const actualByPlan = group(actual, [...dimensions, 'tab']);
+  const actualByPlan = group(actual.map(row => ({
+    ...row,
+    platform: normalize(row.campaign) === 'WINTERKIDS'
+      && row.business === 'MKT' && row.mediaAdType === 'YT - 디맨드젠(트래픽)'
+      ? '유튜브' : row.tab,
+  })), [...dimensions, 'platform']);
   const rows = [...actualByPlan.values()].map(row => {
     const plan = plans.get(keyOf(row));
     return rates({
       ...row, media: row.mediaAdType.split(' - ').slice(1).join(' - ') || row.mediaAdType,
-      platform: row.tab, operationStart: plan?.operationStart ?? '', operationEnd: plan?.operationEnd ?? '',
+      operationStart: plan?.operationStart ?? '', operationEnd: plan?.operationEnd ?? '',
       target: rates(plan?.target ?? {}),
     });
   });
@@ -251,10 +314,13 @@ export function reportMediaTable({ plans, records }, { campaign, endDate, mediaH
       rates: Object.fromEntries(metricKeys.map(key => [key, ratio(totals[key], targets[key], 100)])) };
   });
   const grouped = keys => [...group(actual, keys).values()].map(rates);
+  const dailyMedia = grouped(['metricDate', 'business']);
+  const startDate = [...businessProgress.map(row => row.overallStart), ...dailyMedia.map(row => row.metricDate)]
+    .filter(date => date && date <= endDate).sort()[0] ?? null;
   return {
-    rows: sortedRows, businessProgress, mediaHistory: mediaHistory.filter(selected),
+    startDate, rows: sortedRows, businessProgress, mediaHistory: mediaHistory.filter(selected),
     weeklyTotal: rates(sum(actual)), weeklyMedia: grouped(['weekStart', 'business']),
-    dailyMedia: grouped(['metricDate', 'business']),
+    dailyMedia,
     mediaDaily: grouped(['metricDate', 'business', 'kpi', 'mediaAdType']),
     mediaCreative: grouped(['business', 'kpi', 'mediaAdType', 'adName', 'adGroup']),
   };
