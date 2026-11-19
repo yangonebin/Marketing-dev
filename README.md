@@ -18,13 +18,16 @@ Marketing Dev Launcher로 관리하는 마케팅 자동화 대시보드 프로�
 
 ## 실행 방법
 
-별도 설치 없이 아래 명령으로 테스트용 대시보드를 실행할 수 있습니다.
+작업폴더에서 의존성을 설치한 뒤 테스트용 대시보드를 실행합니다.
 
 ```powershell
+npm ci
 npm run dev
 ```
 
 기본 미리보기 주소는 `http://localhost:5173`입니다.
+
+05 테스트 리포트는 서버의 Google 서비스 계정으로 Drive 원본을 읽습니다. WinterKids는 `BYN_MKT_ADS_RAWDATA_BK.xlsx`를 사용하고, 다른 캠페인은 `BYN_MKT_ADS_RAWDATA_BY.xlsx`를 사용합니다. 서비스 계정에 두 파일의 읽기 권한이 필요하며, 서버는 파싱한 데이터를 5분 동안 캐시합니다.
 
 Marketing Dev Launcher처럼 실행 시 `-p` 또는 `--port`로 미리보기 포트를 전달하는 경우에도 해당 포트를 사용합니다.
 
