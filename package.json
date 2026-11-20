@@ -7,8 +7,5 @@
     "build": "node --test",
     "dev": "node server.js",
     "test": "node --test"
-  },
-  "dependencies": {
-    "exceljs": "^4.4.0"
   }
 }

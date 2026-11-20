@@ -1,7 +1,5 @@
-const defaultFileId = '1GCuqrC-poeuMnBUbBAnazif_bUQ_rY48';
-export const winterKidsFileId = '12qMzpy1rfYicNyp2UoXasNnnbfYvek-w';
 const winterKidsStartDate = '2026-09-01';
-const driveScope = 'https://www.googleapis.com/auth/drive.readonly';
+const sheetsScope = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 const unclassified = '미분류';
 const dimensions = ['campaign', 'business', 'kpi', 'mediaAdType'];
 const excludedMedia = new Map([
@@ -34,7 +32,7 @@ const columns = {
 const metricKeys = Object.keys(columns);
 const emptyMetrics = Object.fromEntries(metricKeys.map(key => [key, null]));
 const kpis = { CPM: '도달', CPV: '조회', CPC: '트래픽', CPLC: '트래픽', ROAS: '전환' };
-const clean = value => String(value?.result ?? value?.text ?? value ?? '').trim();
+const clean = value => String(value ?? '').trim();
 const normalize = value => clean(value).toUpperCase().replace(/[^\p{L}\p{N}]/gu, '');
 const keyOf = (row, keys = dimensions) => JSON.stringify(keys.map(key => row[key]));
 const operationDay = value => {
@@ -49,60 +47,100 @@ function numberValue(value) {
 }
 
 function isoDate(value) {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return clean(value).match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  if (typeof value === 'number' && value > 0 && value < 2_958_466) {
+    return new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86400000).toISOString().slice(0, 10);
+  }
+  return clean(value).match(/^\d{4}-\d{2}-\d{2}(?=$|[T\s])/)?.[0];
 }
 
-export async function parseReportWorkbook(bytes) {
-  const { default: ExcelJS } = await import('exceljs');
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(bytes);
-  const records = [];
-  let mediaTabs = 0;
-  for (const sheet of workbook.worksheets) {
-    if (['읽는 규칙', 'MIX'].includes(sheet.name.trim())) continue;
-    const header = sheet.getRow(1).values.map(clean);
-    const dateColumn = header.indexOf('날짜');
-    const campaignColumn = header.indexOf('광고캠페인이름');
-    if (dateColumn < 0 || campaignColumn < 0) {
-      if (sheet.actualRowCount > 1) throw new Error(`원본 '${sheet.name}' 탭의 날짜·캠페인 열을 확인해 주세요.`);
-      continue;
+function columnName(index) {
+  let letters = '';
+  for (let column = index + 1; column > 0; column = Math.floor((column - 1) / 26)) {
+    letters = String.fromCharCode(65 + (column - 1) % 26) + letters;
+  }
+  return letters;
+}
+
+async function readReportSpreadsheet(spreadsheetId, getToken) {
+  if (!/^[\w-]+$/.test(spreadsheetId ?? '')) throw new Error(`05 원본 Google Sheets ID를 설정해 주세요.`);
+  const token = await getToken(sheetsScope);
+  const root = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
+  const read = async (suffix, params) => {
+    const response = await fetch(`${root}${suffix}?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      const reason = error.error?.details?.find(item => typeof item.reason === 'string')?.reason ?? error.error?.status;
+      const detail = typeof reason === 'string' && /^[A-Z_]+$/.test(reason) ? ` · ${reason}` : '';
+      throw new Error(`05 Google Sheets 조회 실패 (HTTP ${response.status}${detail})`);
     }
-    mediaTabs++;
-    const indices = Object.entries(columns).map(([key, label]) => [key, header.indexOf(label)]);
-    const adColumn = header.indexOf('광고이름');
-    const groupColumn = header.indexOf('광고그룹세트이름');
-    const kpiColumn = header.indexOf('KPI');
-    sheet.eachRow((row, index) => {
-      if (index === 1) return;
-      const cells = row.values;
-      const date = isoDate(cells[dateColumn]);
-      const campaignName = clean(cells[campaignColumn]);
-      if (!date || !campaignName) return;
-      records.push({
-        date, campaignName, tab: sheet.name, adName: clean(cells[adColumn]), adGroup: clean(cells[groupColumn]),
-        kpi: kpis[clean(cells[kpiColumn]).toUpperCase()] ?? unclassified,
-        ...Object.fromEntries(indices.map(([key, col]) => [key, numberValue(cells[col])])),
-      });
+    return response.json();
+  };
+  const metadata = await read('', new URLSearchParams({ fields: 'sheets(properties(title,sheetType))' }));
+  const tabs = (metadata.sheets ?? []).map(sheet => sheet.properties)
+    .filter(sheet => sheet?.sheetType === 'GRID' && /_(?:BY|BK)$/.test(sheet.title) && !/^MIX_(?:BY|BK)$/.test(sheet.title))
+    .map(sheet => sheet.title);
+  if (!tabs.some(tab => tab.endsWith('_BY')) || !tabs.some(tab => tab.endsWith('_BK'))) throw new Error(`05 원본에서 매체 성과 탭을 찾을 수 없습니다.`);
+  const batch = async ranges => {
+    const params = new URLSearchParams({
+      majorDimension: 'ROWS', valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER',
+    });
+    for (const range of ranges) params.append('ranges', range);
+    const { valueRanges } = await read('/values:batchGet', params);
+    if (valueRanges?.length !== ranges.length) throw new Error(`05 원본의 일부 조회 범위가 누락됐습니다.`);
+    return valueRanges.map(range => range.values ?? []);
+  };
+  const sheetRange = title => `'${title.replaceAll("'", "''")}'!`;
+  const headers = await batch(tabs.map(title => `${sheetRange(title)}1:1`));
+  const skippedTabs = [];
+  const mediaTabs = tabs.flatMap((tab, index) => {
+    const header = (headers[index][0] ?? []).map(clean);
+    const find = name => header.indexOf(name);
+    const dateColumn = find('날짜');
+    const campaignColumn = find('광고캠페인이름');
+    const indices = Object.entries(columns).map(([key, name]) => [key, find(name)]);
+    if (dateColumn < 0 || campaignColumn < 0 || find(columns.cost) < 0) {
+      skippedTabs.push(tab);
+      return [];
+    }
+    const adColumn = find('광고이름');
+    const groupColumn = find('광고그룹세트이름');
+    const kpiColumn = find('KPI');
+    const lastColumn = Math.max(dateColumn, campaignColumn, adColumn, groupColumn, kpiColumn, ...indices.map(([, col]) => col));
+    return [{ tab, dateColumn, campaignColumn, adColumn, groupColumn, kpiColumn, indices,
+      range: `${sheetRange(tab)}A2:${columnName(lastColumn)}` }];
+  });
+  if (!mediaTabs.some(sheet => sheet.tab.endsWith('_BY')) || !mediaTabs.some(sheet => sheet.tab.endsWith('_BK'))) throw new Error(`05 원본에서 매체 성과 탭을 찾을 수 없습니다.`);
+
+  const records = { BY: [], BK: [], skippedTabs };
+  for (let offset = 0; offset < mediaTabs.length; offset += 3) {
+    const sheets = mediaTabs.slice(offset, offset + 3);
+    const values = await batch(sheets.map(sheet => sheet.range));
+    sheets.forEach(({ tab, dateColumn, campaignColumn, adColumn, groupColumn, kpiColumn, indices }, index) => {
+      for (const cells of values[index]) {
+        const date = isoDate(cells[dateColumn]);
+        const campaignName = clean(cells[campaignColumn]);
+        if (!date || !campaignName) continue;
+        records[tab.slice(-2)].push({
+          date, campaignName, tab: tab.slice(0, -3), adName: clean(cells[adColumn]), adGroup: clean(cells[groupColumn]),
+          kpi: kpis[clean(cells[kpiColumn]).toUpperCase()] ?? unclassified,
+          ...Object.fromEntries(indices.map(([key, col]) => [key, numberValue(cells[col])])),
+        });
+      }
     });
   }
-  if (!mediaTabs) throw new Error('원본 Excel에서 매체 성과 탭을 찾을 수 없습니다.');
   return records;
 }
 
-export function createReportSource(getToken, fileId = defaultFileId) {
+export function createReportSource(getToken, spreadsheetId) {
   let cache;
   let loading;
   return async () => {
     if (cache?.expiresAt > Date.now()) return cache.records;
     loading ??= (async () => {
-      const token = await getToken(driveScope);
-      const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(60_000),
-      });
-      if (!response.ok) throw new Error(`05 원본 Excel 읽기 실패 (Drive HTTP ${response.status})`);
-      const records = await parseReportWorkbook(await response.arrayBuffer());
+      const records = await readReportSpreadsheet(spreadsheetId, getToken);
       cache = { records, expiresAt: Date.now() + 5 * 60_000 };
       return records;
     })().finally(() => { loading = undefined; });
@@ -130,6 +168,9 @@ export function classifyReport(records, filters, { winterKidsSource = false } = 
   const campaignsByKey = new Map(campaignKeys.map(([campaign, key]) => [key, campaign]));
   const winterKids = campaignsByKey.get('WINTERKIDS') ?? 'WinterKids';
   const sales = campaignsByKey.get('SALES') ?? 'SALES';
+  const salesStarts = [...plans.values()].filter(plan => plan.campaign === sales)
+    .map(plan => operationDay(plan.operationStart)).filter(Boolean).sort();
+  const salesYear = new Date(Date.now() + 9 * 3600000).getUTCFullYear();
   const nonSalesCampaignKeys = campaignKeys.filter(([, key]) => key !== 'SALES');
   const mappingCache = new Map();
   const mapped = records.map(record => {
@@ -162,7 +203,12 @@ export function classifyReport(records, filters, { winterKidsSource = false } = 
     }
     return { ...record, ...match };
   });
-  const recordsForReport = mapped.filter(row => !excludedMedia.get(normalize(row.campaign))?.includes(row.mediaAdType));
+  const recordsForReport = mapped.filter(row => {
+    if (excludedMedia.get(normalize(row.campaign))?.includes(row.mediaAdType)) return false;
+    if (row.campaign !== sales) return true;
+    const start = operationDay(plans.get(keyOf(row))?.operationStart) ?? salesStarts[0];
+    return !start || row.date >= `${salesYear}-${start}`;
+  });
   return { plans, records: recordsForReport };
 }
 
