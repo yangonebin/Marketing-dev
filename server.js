@@ -4,7 +4,7 @@ import { getAvailableMedia, parseHistoryRows, parseMediaMixRows, parseMediaMixTa
 import { extname, join, normalize } from 'node:path';
 import { randomUUID, sign } from 'node:crypto';
 import { getCampaignYoy } from './campaign-yoy.js';
-import { classifyReportSources, createReportSource, reportMediaTable, reportOptions, reportSummary, winterKidsFileId } from './campaign-workbook.js';
+import { classifyReportSources, createReportSource, reportMediaTable, reportOptions, reportSummary } from './campaign-workbook.js';
 import { createAccounts, createAuth } from './auth.js';
 
 function getPort(args = process.argv.slice(2), environment = process.env) {
@@ -87,8 +87,9 @@ function readJsonBody(request, maxBytes = 12 * 1024 * 1024) {
 }
 
 const campaignSheet = {
-  spreadsheetId: '1IP9rWvILocygHodSTiDxc5TDKB7LNnLJJNVJFTGlXN4',
-  ranges: ["'미디어믹스'!A:AA", "'UTM 누적(26FW~)'!F3:V26", "'UTM 누적(26FW~)'!F46:AF", "'히스토리'!A:Z", "'YoY 데이터'!A:I"],
+  spreadsheetId: '1AJpOzH3wc3NNxpgaJXPE5F7bshoqLM8L5B9bbadDHK4',
+  ranges: ["'미디어믹스'!A:AA", "'UTM 누적(26FW~)'!F3:V26", "'UTM 누적(26FW~)'!F46:AF"],
+  optionalRanges: [['히스토리', "'히스토리'!A:Z"], ['YoY 데이터', "'YoY 데이터'!A:I"]],
 };
 let campaignCache = { expiresAt: 0, values: null };
 
@@ -161,15 +162,22 @@ async function getCampaignFilters() {
   if (campaignCache.expiresAt > Date.now()) return campaignCache.values;
 
   const accessToken = await getGoogleAccessToken();
-  const rangeParams = campaignSheet.ranges.map(range => `ranges=${encodeURIComponent(range)}`).join('&');
-  const sheetResponse = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${campaignSheet.spreadsheetId}/values:batchGet?${rangeParams}&majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-  );
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const root = `https://sheets.googleapis.com/v4/spreadsheets/${campaignSheet.spreadsheetId}`;
+  const metadataResponse = await fetch(`${root}?fields=sheets(properties(title))`, { headers });
+  if (!metadataResponse.ok) throw new Error(`통합 Google Sheets 메타데이터 조회 실패 (${metadataResponse.status})`);
+  const metadata = await metadataResponse.json();
+  const titles = new Set((metadata.sheets ?? []).map(sheet => sheet.properties.title));
+  const optional = campaignSheet.optionalRanges.filter(([title]) => titles.has(title));
+  const rangeParams = [...campaignSheet.ranges, ...optional.map(([, range]) => range)]
+    .map(range => `ranges=${encodeURIComponent(range)}`).join('&');
+  const sheetResponse = await fetch(`${root}/values:batchGet?${rangeParams}&majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`, { headers });
+  if (!sheetResponse.ok) throw new Error(`통합 Google Sheets 조회 실패 (${sheetResponse.status})`);
   const sheetResult = await sheetResponse.json();
-  if (!sheetResponse.ok) throw new Error(`Google Sheets 조회 실패 (${sheetResponse.status})`);
-
-  const [mediaMixRows = [], utmIndexRows = [], utmRows = [], rawHistoryRows = [], yoyRows = []] = (sheetResult.valueRanges ?? []).map(item => item.values ?? []);
+  const [mediaMixRows = [], utmIndexRows = [], utmRows = [], ...optionalValues] = (sheetResult.valueRanges ?? []).map(item => item.values ?? []);
+  const optionalRows = new Map(optional.map(([title], index) => [title, optionalValues[index] ?? []]));
+  const rawHistoryRows = optionalRows.get('히스토리') ?? [];
+  const yoyRows = optionalRows.get('YoY 데이터') ?? [];
   const { campaigns, mediaAdTypes, filterRows } = parseMediaMixRows(mediaMixRows);
   const mediaMixTable = parseMediaMixTable(mediaMixRows);
   const historyRows = parseHistoryRows(rawHistoryRows);
@@ -190,13 +198,12 @@ async function getCampaignFilters() {
   return values;
 }
 
-const getReportRecords = createReportSource(getGoogleAccessToken);
-const getWinterKidsRecords = createReportSource(getGoogleAccessToken, winterKidsFileId);
+const getReportRecords = createReportSource(getGoogleAccessToken, campaignSheet.spreadsheetId);
 let mappedReport;
 async function getTestReport(filters) {
-  const [records, winterKidsRecords] = await Promise.all([getReportRecords(), getWinterKidsRecords()]);
-  if (mappedReport?.records !== records || mappedReport?.winterKidsRecords !== winterKidsRecords || mappedReport?.filters !== filters) {
-    mappedReport = { records, winterKidsRecords, filters, report: classifyReportSources(records, winterKidsRecords, filters) };
+  const records = await getReportRecords();
+  if (mappedReport?.records !== records || mappedReport?.filters !== filters) {
+    mappedReport = { records, filters, report: { ...classifyReportSources(records.BY, records.BK, filters), skippedTabs: records.skippedTabs } };
   }
   return mappedReport.report;
 }
@@ -1275,11 +1282,10 @@ const server = createServer(async (request, response) => {
   if (pathname === '/api/campaigns' || pathname === '/api/test-report-campaigns') {
     try {
       const filters = await getCampaignFilters();
-      const { campaigns, mediaAdTypes, filterRows } = pathname === '/api/test-report-campaigns'
-        ? reportOptions(await getTestReport(filters))
-        : filters;
+      const report = pathname === '/api/test-report-campaigns' ? await getTestReport(filters) : null;
+      const { campaigns, mediaAdTypes, filterRows } = report ? reportOptions(report) : filters;
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-      response.end(JSON.stringify({ campaigns, mediaAdTypes, filterRows }));
+      response.end(JSON.stringify({ campaigns, mediaAdTypes, filterRows, skippedTabs: report?.skippedTabs }));
     } catch (error) {
       console.error(`Campaign sheet error: ${error.message}`);
       response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -1314,7 +1320,7 @@ const server = createServer(async (request, response) => {
         : await getCampaignMediaMetrics({ campaign, business, mediaAdTypes, mediaNeedles, startDate, endDate });
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       const yoy = getCampaignYoy(filters.yoyRows, campaign);
-      response.end(JSON.stringify({ campaign, business, mediaAdTypes, startDate, endDate, ...performance, yoy }));
+      response.end(JSON.stringify({ campaign, business, mediaAdTypes, startDate, endDate, ...performance, yoy, skippedTabs: testReport?.skippedTabs }));
     } catch (error) {
       console.error(`Campaign media metrics error: ${error.message}`);
       response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -1348,9 +1354,11 @@ const server = createServer(async (request, response) => {
       let result;
       if (pathname === '/api/test-report-media-table') {
         const filters = await getCampaignFilters();
-        result = reportMediaTable(await getTestReport(filters), {
+        const report = await getTestReport(filters);
+        result = reportMediaTable(report, {
           campaign, endDate: reportYesterday(), mediaHistory: filters.historyRows ?? [],
         });
+        result.skippedTabs = report.skippedTabs;
       } else {
         result = await getCampaignMediaTable({ campaign });
       }

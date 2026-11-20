@@ -277,6 +277,14 @@ function renderCampaignReport() {
   loadCampaignMediaMetrics();
 }
 
+function renderTestReportSourceStatus(skippedTabs = []) {
+  const label = document.querySelector('#test-report-data-label');
+  label.textContent = skippedTabs.length
+    ? `합계 제외 · ${skippedTabs.join(', ')} (원본 헤더 오류)`
+    : 'Google Sheets 원본 데이터';
+  label.classList.toggle('source-warning', skippedTabs.length > 0);
+}
+
 async function loadCampaignMediaMetrics() {
   const campaign = document.querySelector('#campaign-select').value;
   const business = document.querySelector('#campaign-business').value;
@@ -291,6 +299,7 @@ async function loadCampaignMediaMetrics() {
     const result = await readJsonResponse(response);
     if (!response.ok) throw new Error(result.error || '매체 데이터를 불러오지 못했습니다.');
     if (requestId !== campaignMetricRequestId) return;
+    if (isTestReport()) renderTestReportSourceStatus(result.skippedTabs);
     if (isTestReport() && !Object.hasOwn(result.metrics, 'mediaRevenue')) {
       try {
         await loadLegacyMediaRevenue(result, params);
@@ -440,6 +449,7 @@ async function loadCampaignMediaTable() {
     const result = await readJsonResponse(response);
     if (!response.ok) throw new Error(result.error || '매체 데이터를 불러오지 못했습니다.');
     if (requestId !== campaignMediaTableRequestId) return;
+    if (isTestReport()) renderTestReportSourceStatus(result.skippedTabs);
     renderBusinessProgress(result.businessProgress ?? [], result.rows);
     renderGoalKpiGaps(result.rows);
     latestWeeklyMediaRows = result.weeklyMedia ?? [];
@@ -1439,6 +1449,7 @@ async function loadCampaignOptions() {
     ].join('');
     select.disabled = false;
     select.removeAttribute('title');
+    if (testMode) renderTestReportSourceStatus(result.skippedTabs);
     campaignFilterRows = result.filterRows ?? [];
     legacyCampaignMediaOptions = result.mediaAdTypes ?? [];
     select.value = [...select.options].some(option => option.value === savedCampaign) ? savedCampaign : 'all';
